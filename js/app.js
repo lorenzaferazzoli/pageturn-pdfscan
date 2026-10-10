@@ -1392,7 +1392,7 @@ async function settings() {
       <div class="li"><span>Versione</span><span class="r">${VERSION}</span></div>
       <a class="li accent" href="${REPO}" target="_blank" rel="noopener" style="text-decoration:none"><span>Codice sorgente su GitHub</span>${icon('chevron-right')}</a>
     </div>
-    <p class="note">Pageturn è open source (licenza MIT). Le scansioni restano sul tuo dispositivo e sul tuo server: nessun dato passa da altri servizi.</p>`);
+    <p class="note">Pageturn è open source (licenza GPL-3.0). Le scansioni restano sul tuo dispositivo e sul tuo server: nessun dato passa da altri servizi.</p>`);
 
   $$('#theme button', s.el).forEach((b) => (b.onclick = () => {
     applyTheme(b.dataset.t);

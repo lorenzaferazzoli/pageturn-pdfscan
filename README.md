@@ -117,4 +117,4 @@ sh scripts/paddle-models.sh  # per riscaricare i modelli PaddleOCR
 
 ## Licenza
 
-[MIT](LICENSE).
+[GPL-3.0](LICENSE): puoi usarlo, modificarlo e ridistribuirlo, a patto che anche le versioni modificate restino open source con la stessa licenza.

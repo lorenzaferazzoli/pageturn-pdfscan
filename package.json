@@ -8,7 +8,7 @@
     "icons": "node scripts/icons.mjs",
     "test": "node tests/run.mjs"
   },
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "dependencies": {
     "@tesseract.js-data/eng": "^1.0.0",
     "@tesseract.js-data/ita": "^1.0.0",
