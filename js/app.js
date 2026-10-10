@@ -7,7 +7,7 @@ import { renderPage, detectPage } from './jobs.js';
 import { splitQuad, FULL_QUAD, homography } from './proc.js';
 import { ENGINES as OCR_ENGINES } from './ocr.js';
 
-export const VERSION = '1.4.0';
+export const VERSION = '1.4.1';
 export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------
@@ -968,7 +968,7 @@ async function editor(pageId) {
       const my = ++token;
       $('#busy', el).hidden = false;
       try {
-        const r = await renderPage(orig, params, { maxSide: 1300, quality: 0.86 });
+        const r = await renderPage(orig, params, { maxSide: 1200, quality: 0.86 });
         if (my !== token || mode === 'crop') return;
         pw = r.width;
         ph = r.height;

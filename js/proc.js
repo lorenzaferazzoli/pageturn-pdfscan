@@ -262,33 +262,46 @@ export function applyFilter(img, { filter = 'whiten', brightness = 0, contrast =
       d[i] = lut[d[i]]; d[i + 1] = lut[d[i + 1]]; d[i + 2] = lut[d[i + 2]];
     }
   } else {
-    // Normalizzazione dello sfondo: carta bianca, ombra della piega rimossa.
-    const step = 4;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x += step) {
-        bgAt(bg, x, y, px);
-        const xe = Math.min(w, x + step);
-        for (let xx = x; xx < xe; xx++) {
-          const i = (y * w + xx) * 4;
-          const r = Math.min(255, (d[i] * 255) / px[0]);
-          const g = Math.min(255, (d[i + 1] * 255) / px[1]);
-          const b = Math.min(255, (d[i + 2] * 255) / px[2]);
-          if (filter === 'whiten') {
-            d[i] = r; d[i + 1] = g; d[i + 2] = b;
-          } else {
-            d[i] = d[i + 1] = d[i + 2] = (r * 77 + g * 150 + b * 29) >> 8;
-          }
-        }
-      }
-    }
+    // Livelli automatici: il punto più scuro dell'inchiostro, stimato su un campione già normalizzato.
     if (filter === 'whiten' || filter === 'gray') {
       const hist = new Uint32Array(256);
-      for (let i = 0; i < d.length; i += 16) hist[(d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8]++;
-      const tot = d.length / 16;
+      let tot = 0;
+      for (let y = 0; y < h; y += 4) {
+        for (let x = 0; x < w; x += 4) {
+          bgAt(bg, x, y, px);
+          const i = (y * w + x) * 4;
+          const l = Math.min(255, ((d[i] * 77) / px[0] + (d[i + 1] * 150) / px[1] + (d[i + 2] * 29) / px[2])) | 0;
+          hist[l]++;
+          tot++;
+        }
+      }
       let ink = 0;
       for (let acc = 0; ink < 255 && acc + hist[ink] < tot * 0.012; ink++) acc += hist[ink];
       lut = makeLut(Math.max(15, Math.min(110, ink)));
-      for (let i = 0; i < d.length; i += 4) { d[i] = lut[d[i]]; d[i + 1] = lut[d[i + 1]]; d[i + 2] = lut[d[i + 2]]; }
+    }
+    // Normalizzazione dello sfondo (carta bianca, ombra della piega rimossa) e curva tonale in un'unica passata.
+    const step = 4;
+    const id = filter === 'bw';
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x += step) {
+        bgAt(bg, x, y, px);
+        const fr = 255 / px[0];
+        const fg = 255 / px[1];
+        const fb = 255 / px[2];
+        const xe = Math.min(w, x + step);
+        for (let xx = x; xx < xe; xx++) {
+          const i = (y * w + xx) * 4;
+          const r = Math.min(255, d[i] * fr) | 0;
+          const g = Math.min(255, d[i + 1] * fg) | 0;
+          const b = Math.min(255, d[i + 2] * fb) | 0;
+          if (filter === 'whiten') {
+            d[i] = lut[r]; d[i + 1] = lut[g]; d[i + 2] = lut[b];
+          } else {
+            const l = (r * 77 + g * 150 + b * 29) >> 8;
+            d[i] = d[i + 1] = d[i + 2] = id ? l : lut[l];
+          }
+        }
+      }
     }
     if (filter === 'bw') {
       sharpenAll(img, sharp, 1.4);
@@ -414,11 +427,57 @@ export function sharpness(gray, w, h) {
 }
 
 // Nitidezza su due scale (contorni fini delle lettere e tratti interi), proporzionale alla pagina.
+// Un'unica passata: luminosità, due sfocature a scatola calcolate insieme, correzione applicata.
 function sharpenAll(img, sharp, k) {
   if (sharp <= 0) return;
-  const big = Math.max(1, Math.round(Math.max(img.width, img.height) / 1200)); // 2 px su una pagina da 2400
-  sharpen(img, sharp * k * 0.8, 1);
-  sharpen(img, sharp * k * 0.5, big + 1);
+  const R = Math.max(1, Math.round(Math.max(img.width, img.height) / 1200)) + 1;
+  sharpen2(img, sharp * k * 0.8, sharp * k * 0.5, R);
+}
+
+function sharpen2(img, a1, a2, R) {
+  const { width: w, height: h, data: d } = img;
+  const n = w * h;
+  const L = new Uint8Array(n);
+  for (let i = 0, j = 0; j < n; i += 4, j++) L[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+  // somme orizzontali su 3 e su 2R+1 pixel
+  const H1 = new Uint16Array(n);
+  const H2 = new Uint16Array(n);
+  for (let y = 0; y < h; y++) {
+    const o = y * w;
+    let s2 = 0;
+    for (let x = -R; x <= R; x++) s2 += L[o + Math.min(w - 1, Math.max(0, x))];
+    for (let x = 0; x < w; x++) {
+      const i = o + x;
+      H1[i] = L[x > 0 ? i - 1 : i] + L[i] + L[x < w - 1 ? i + 1 : i];
+      H2[i] = s2;
+      s2 += L[o + Math.min(w - 1, x + R + 1)] - L[o + Math.max(0, x - R)];
+    }
+  }
+  const k1 = a1 / 9;
+  const k2 = a2 / ((2 * R + 1) * (2 * R + 1));
+  const col = new Uint32Array(w); // somme verticali correnti della scala grande
+  for (let x = 0; x < w; x++) {
+    let s = 0;
+    for (let y = -R; y <= R; y++) s += H2[Math.min(h - 1, Math.max(0, y)) * w + x];
+    col[x] = s;
+  }
+  for (let y = 0; y < h; y++) {
+    const o = y * w;
+    const up = (y > 0 ? y - 1 : y) * w;
+    const dn = (y < h - 1 ? y + 1 : y) * w;
+    const add = Math.min(h - 1, y + R + 1) * w;
+    const sub = Math.max(0, y - R) * w;
+    for (let x = 0; x < w; x++) {
+      const i = o + x;
+      const l = L[i];
+      const delta = (9 * l - H1[up + x] - H1[i] - H1[dn + x]) * k1 + ((2 * R + 1) * (2 * R + 1) * l - col[x]) * k2;
+      col[x] += H2[add + x] - H2[sub + x];
+      if (delta > -1 && delta < 1) continue;
+      const q = i * 4;
+      d[q] += delta; d[q + 1] += delta; d[q + 2] += delta;
+    }
+  }
+  return img;
 }
 
 // Maschera di contrasto (unsharp mask): si aggiunge la differenza dalla luminosità sfocata (media su (2r+1)²).

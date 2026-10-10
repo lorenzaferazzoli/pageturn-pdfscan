@@ -2,7 +2,7 @@
 import * as db from './db.js';
 import { renderPage } from './jobs.js';
 
-export const PROC = { maxSide: 3000, quality: 0.88, thumb: 360 };
+export const PROC = { maxSide: 2400, quality: 0.88, thumb: 360 };
 
 export const events = new EventTarget();
 const queue = [];
@@ -48,7 +48,7 @@ async function processOne(id, attempt = 0) {
   if (!orig) return;
   const rev = page.rev;
   try {
-    const r = await renderPage(orig, page.params, { ...PROC, measure: true });
+    const r = await renderPage(orig, page.params, { ...PROC, measure: true, lane: 'bg' });
     const fresh = await db.getPage(id);
     if (!fresh) return; // eliminata nel frattempo
     if (fresh.rev !== rev) return enqueue(id, true); // modificata nel frattempo: si rifà

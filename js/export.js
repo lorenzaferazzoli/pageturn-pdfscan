@@ -12,7 +12,7 @@ import { PROC } from './queue.js';
 export const QUALITY = {
   low: { maxSide: 1600, quality: 0.65, label: 'Bassa' },
   medium: { maxSide: 2400, quality: 0.82, label: 'Media' },
-  high: { maxSide: 3000, quality: 0.92, label: 'Alta' },
+  high: { maxSide: 2400, quality: 0.92, label: 'Alta' },
 };
 
 const PAGE_LONG = 684; // punti tipografici: 9,5 pollici, circa 24 cm

@@ -1,6 +1,6 @@
 {
   "name": "pageturn",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Scanner di libri in PDF per iPhone e Android: web app offline, OCR, backup automatico, open source.",
   "scripts": {
     "start": "node server/server.js",

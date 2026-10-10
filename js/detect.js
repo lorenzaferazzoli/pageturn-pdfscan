@@ -5,7 +5,8 @@ import { otsu, homography } from './proc.js';
 // gray: Uint8Array w×h. Restituisce oppure null:
 //   quad: la pagina da usare (TL,TR,BR,BL normalizzati); full: tutta la regione chiara;
 //   spine: la piega del libro aperto, se c'è; halves: [sinistra, destra] divise lungo la piega.
-export function detectQuad(gray, w, h) {
+// fast: per il mirino dal vivo; se la regione chiara dà già una pagina convincente non si cercano le rette.
+export function detectQuad(gray, w, h, { fast = false } = {}) {
   const n = w * h;
   // Sfocatura 3×3 per togliere rumore e testo minuto.
   const b = new Uint8Array(n);
@@ -33,24 +34,36 @@ export function detectQuad(gray, w, h) {
   for (let i = 0; i < 256; i++) {
     if (i <= t) { lo += i * hist[i]; nl += hist[i]; } else { hi += i * hist[i]; nh += hist[i]; }
   }
+  const regionOk0 = nl && nh && hi / nh - lo / nl >= 28;
+  // dal vivo basta la regione chiara (come prima): le rette e la piega si cercano allo scatto
+  if (fast) {
+    const rq0 = regionOk0 ? regionQuad(b, w, h, t) : null;
+    return rq0 && convex(rq0) && minAngle(rq0) >= 50 ? finish(b, w, h, rq0, 1, false) : null;
+  }
   // Per i bordi si sfoca di più: le righe di testo diventano una macchia grigia, i bordi della pagina restano.
   const r = Math.max(1, Math.round(Math.max(w, h) / 140));
   const bb = boxBlur(boxBlur(b, w, h, r), w, h, r);
   const edges = sobel(bb, w, h);
   const regionOk = nl && nh && hi / nh - lo / nl >= 28;
   const rq = regionOk ? regionQuad(b, w, h, t) : null;
-  const cands = houghQuads(edges, w, h, rq);
-  if (rq) cands.push(rq);
   // si tiene il quadrilatero con più bordi "veri" sotto i lati e carta più chiara all'interno
   let q = null;
   let qs = 0;
-  for (const c of cands) {
-    if (!convex(c) || minAngle(c) < 50) continue;
-    const sc = scoreQuad(edges, bb, w, h, c);
-    if (sc > qs) { qs = sc; q = c; }
+  if (rq && convex(rq) && minAngle(rq) >= 50) { q = rq; qs = scoreQuad(edges, bb, w, h, rq, 28); }
+  if (!fast || qs < 0.6) {
+    // prima una stima rapida su pochi punti, poi il calcolo completo solo sui migliori
+    const cands = houghQuads(edges, w, h, rq)
+      .filter((c) => convex(c) && minAngle(c) >= 50)
+      .map((c) => [scoreQuad(edges, bb, w, h, c, 10), c])
+      .sort((x, y) => y[0] - x[0])
+      .slice(0, 24);
+    for (const [, c] of cands) {
+      const sc = scoreQuad(edges, bb, w, h, c, 28);
+      if (sc > qs) { qs = sc; q = c; }
+    }
   }
   if (!q || qs < 0.38) return null;
-  return finish(b, w, h, q, qs);
+  return finish(b, w, h, q, qs, !fast);
 }
 
 // Regione chiara più grande (la carta su uno sfondo più scuro) e suoi angoli.
@@ -109,12 +122,12 @@ function regionQuad(b, w, h, t) {
   return q;
 }
 
-function finish(b, w, h, q, fill) {
+function finish(b, w, h, q, fill, spineSearch = true) {
   const norm = (pts) => pts.map(([x, y]) => [Math.min(1, Math.max(0, x / w)), Math.min(1, Math.max(0, y / h))]);
   const full = norm(q);
 
   // Libro aperto: si cerca la piega tra le due pagine.
-  const sp = findSpine(b, w, h, q);
+  const sp = spineSearch ? findSpine(b, w, h, q) : null;
   let quad = full;
   let halves = null;
   let spine = null;
@@ -483,8 +496,8 @@ function houghQuads({ gx, gy, m }, w, h, rq) {
     if (ny < 0 || (ny === 0 && nx < 0)) { nx = -nx; ny = -ny; }
     return { c: nx, s: ny, r: p[0] * nx + p[1] * ny, deg: (Math.atan2(ny, nx) * 180) / Math.PI };
   };
-  const hor = lines.filter((l) => Math.abs(l.deg - 90) < 35).slice(0, 9);
-  const ver = lines.filter((l) => Math.abs(l.deg - 90) > 55).slice(0, 8);
+  const hor = lines.filter((l) => Math.abs(l.deg - 90) < 35).slice(0, 7);
+  const ver = lines.filter((l) => Math.abs(l.deg - 90) > 55).slice(0, 7);
   // anche i lati della regione chiara e i bordi dell'immagine (pagina che esce dall'inquadratura)
   if (rq) {
     hor.push(through(rq[0], rq[1]), through(rq[3], rq[2]));
@@ -524,12 +537,11 @@ function houghQuads({ gx, gy, m }, w, h, rq) {
 
 // Punteggio di un quadrilatero: quanta parte dei lati poggia su un bordo vero (gradiente
 // perpendicolare al lato), quanto l'interno è più chiaro dell'esterno, quanto è grande.
-function scoreQuad({ gx, gy }, g, w, h, q) {
+function scoreQuad({ gx, gy }, g, w, h, q, N = 28) {
   const A = area(q) / (w * h);
   if (A < 0.12 || A > 1.02) return 0;
   const cx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4;
   const cy = (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4;
-  const N = 28;
   const sideE = [];
   let con = 0;
   let conN = 0;
