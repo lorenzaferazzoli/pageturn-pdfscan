@@ -43,7 +43,63 @@ async function thumbOf(c, side) {
   return encode(t, 'image/jpeg', 0.72);
 }
 
-// params: { quad, rotation, filter, brightness, contrast, erase }
+// ---------- pagina curva (UVDoc) ----------
+// Il modello stima come è piegata la pagina e la distende. Si carica solo al primo uso (31 MB).
+const UV_MAX = 1800; // lato lungo massimo su cui lavora (memoria del telefono)
+let uv = null;
+let uvCache = { key: '', img: null };
+
+async function uvSession() {
+  if (uv) return uv;
+  const base = new URL('../vendor/', import.meta.url).href;
+  const ort = await import('../vendor/ort/ort.wasm.min.mjs');
+  ort.env.wasm.wasmPaths = base + 'ort/';
+  ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 2) : 1;
+  const r = await fetch(base + 'paddle/uvdoc.onnx');
+  if (!r.ok) throw new Error('Modello per le pagine curve non disponibile');
+  const session = await ort.InferenceSession.create(new Uint8Array(await r.arrayBuffer()), { executionProviders: ['wasm'] });
+  uv = { ort, session };
+  return uv;
+}
+
+function scaleImage(img, maxSide) {
+  const k = maxSide / Math.max(img.width, img.height);
+  if (k >= 1) return img;
+  const c = putImage(img);
+  const t = canvas(Math.round(img.width * k), Math.round(img.height * k));
+  const x = ctx2d(t);
+  x.imageSmoothingQuality = 'high';
+  x.drawImage(c, 0, 0, t.width, t.height);
+  return x.getImageData(0, 0, t.width, t.height);
+}
+
+async function dewarp(img, key) {
+  if (uvCache.key === key) return { data: new Uint8ClampedArray(uvCache.img.data), width: uvCache.img.width, height: uvCache.img.height };
+  const { ort, session } = await uvSession();
+  const src = scaleImage(img, UV_MAX);
+  const { width: w, height: h, data: d } = src;
+  const n = w * h;
+  const x = new Float32Array(3 * n);
+  for (let i = 0; i < n; i++) {
+    x[i] = d[i * 4] / 255;
+    x[n + i] = d[i * 4 + 1] / 255;
+    x[2 * n + i] = d[i * 4 + 2] / 255;
+  }
+  const r = await session.run({ [session.inputNames[0]]: new ort.Tensor('float32', x, [1, 3, h, w]) });
+  const o = r[session.outputNames[0]].data;
+  const out = new Uint8ClampedArray(n * 4);
+  for (let i = 0; i < n; i++) {
+    out[i * 4] = o[i] * 255;
+    out[i * 4 + 1] = o[n + i] * 255;
+    out[i * 4 + 2] = o[2 * n + i] * 255;
+    out[i * 4 + 3] = 255;
+  }
+  const res = { data: out, width: w, height: h };
+  uvCache = { key, img: { data: new Uint8ClampedArray(out), width: w, height: h } };
+  return res;
+}
+
+// params: { quad, rotation, filter, brightness, contrast, erase, dewarp }
 // opts: { maxSide, quality, thumb }
 export async function render(blob, params = {}, opts = {}) {
   const maxSide = opts.maxSide || 2400;
@@ -67,6 +123,7 @@ export async function render(blob, params = {}, opts = {}) {
     q = q.map(([a, b]) => [a * k, b * k]);
     let img = warp(src, q, ow, oh);
     img = rotate(img, params.rotation || 0);
+    if (params.dewarp) img = await dewarp(img, `${blob.size}|${JSON.stringify(qn)}|${params.rotation || 0}|${maxSide}`);
 
     // Nitidezza misurata prima dei filtri, su una versione ridotta.
     let sharp = null;

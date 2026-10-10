@@ -38,7 +38,7 @@ const icons = [
   'camera-rotate', 'photo-plus', 'checkbox', 'dots', 'crop', 'columns-2', 'rotate-clockwise', 'eraser',
   'download', 'upload', 'share-2', 'settings', 'plus', 'trash', 'book-2', 'bolt', 'arrow-back-up', 'check',
   'alert-triangle', 'wand', 'grip-vertical', 'pencil', 'file-zip', 'server', 'info-circle', 'arrows-move',
-  'loader-2', 'device-floppy', 'photo', 'file-type-pdf', 'square-plus', 'book', 'adjustments-horizontal',
+  'loader-2', 'device-floppy', 'photo', 'file-type-pdf', 'square-plus', 'book', 'adjustments-horizontal', 'wave-sine',
 ];
 const out = {};
 for (const name of icons) {

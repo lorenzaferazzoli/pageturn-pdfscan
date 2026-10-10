@@ -16,7 +16,8 @@ Scanner di libri in PDF che gira nel browser del telefono. Niente app store, nie
 - **Doppia pagina:** uno scatto del libro aperto diventa due pagine. Si può anche dividere una pagina dopo.
 - **Gomma** per macchie, segni a matita e dita sul bordo.
 - **Avviso sulle foto mosse**, rotazione, riordino trascinando, riscatto di una singola pagina.
-- **OCR italiano e inglese** sul telefono (Tesseract): il PDF ha il testo ricercabile e selezionabile.
+- **Pagine curve:** lo strumento *Distendi* raddrizza le righe piegate vicino alla rilegatura (modello UVDoc), su una pagina o su tutte quelle selezionate.
+- **OCR sul telefono** con due motori: *Preciso* (PaddleOCR PP-OCRv5, italiano, inglese e le altre lingue latine) e *Veloce* (Tesseract). Il PDF ha il testo ricercabile e selezionabile.
 - **Esportazione** in PDF (tre livelli di qualità) o in immagini JPEG, con salvataggio diretto su File, iCloud Drive, Google Drive o Dropbox dal menu Condividi.
 - **Leggera e veloce.** L'elaborazione gira in background: nelle prove 120 pagine vengono elaborate senza bloccare l'interfaccia.
 - **Tema chiaro e scuro**, automatico o scelto a mano.
@@ -75,10 +76,24 @@ Le foto restano sul telefono e, se lo configuri, sul tuo server. L'OCR avviene s
 
 ## Limiti noti
 
-- La curvatura delle pagine vicino alla rilegatura non viene distesa: lo sbiancamento toglie l'ombra, ma le righe molto curve restano curve. Fotografare dall'alto con il libro ben aperto aiuta.
+- *Distendi* funziona bene sulle curvature normali dei libri aperti; con pieghe molto forti può deformare i bordi della pagina. Si vede subito nell'anteprima, e si può disattivare.
 - Il riconoscimento della pagina cerca la carta chiara su uno sfondo più scuro. Su un tavolo bianco conviene lo scatto manuale e la regolazione degli angoli.
 - Con la fotocamera dentro l'app la risoluzione è quella del video (fino a 4K, dipende dal telefono). Per le pagine con caratteri minuti c'è la fotocamera di iOS a piena risoluzione.
-- L'OCR sul telefono richiede qualche secondo a pagina; per un libro intero conviene lasciare l'app aperta in carica.
+- L'OCR sul telefono richiede qualche secondo a pagina (il motore *Preciso* circa il triplo di *Veloce*); per un libro intero conviene lasciare l'app aperta in carica. La prima volta scarica i modelli: circa 27 MB per *Preciso*, 10 MB per *Veloce*, 31 MB per *Distendi*.
+
+## Quale OCR
+
+Confronto sulle pagine di prova in `tests/fixtures/ocr` (errore sui caratteri, più basso è meglio; `node tests/ocr-compare.mjs`):
+
+| Pagina | Tesseract | PaddleOCR |
+|---|---|---|
+| romanzo, foto nitida | 0,0% | 0,0% |
+| manuale con nota a piè di pagina | 0,7% | 0,7% |
+| foto a bassa risoluzione (700 px) | 12,1% | 1,5% |
+| pagina curva vicino alla rilegatura | 16,1% | 0,0% |
+| manuale, pagina curva | 19,9% | 13,9% |
+
+Sulle pagine pulite i due motori si equivalgono; su foto piccole e pagine curve PaddleOCR sbaglia molto meno.
 
 ## Sviluppo
 
@@ -90,11 +105,12 @@ npm start                    # http://localhost:8080
 npm test                     # prova completa in Chromium con una finta fotocamera
 node tests/stress.mjs 120    # prova di carico
 npm run vendor               # dopo aver aggiornato le librerie
+sh scripts/paddle-models.sh  # per riscaricare i modelli PaddleOCR
 ```
 
 | Cartella | Contenuto |
 |---|---|
-| `js/` | app (`app.js`), archivio (`db.js`), fotocamera e scatto automatico (`camera.js`, `detect.js`), elaborazione immagini (`proc.js`, `render.js`, nel worker), coda (`queue.js`), OCR, PDF e backup (`ocr.js`, `export.js`), backup sul server (`sync.js`) |
+| `js/` | app (`app.js`), archivio (`db.js`), fotocamera e scatto automatico (`camera.js`, `detect.js`), elaborazione immagini (`proc.js`, `render.js`, nel worker), coda (`queue.js`), OCR (`ocr.js`, `paddle.js`, `paddle-worker.js`), PDF e backup (`export.js`), backup sul server (`sync.js`) |
 | `server/` | server Node senza dipendenze |
 | `vendor/` | librerie incluse (vedi [THIRD-PARTY.md](THIRD-PARTY.md)) |
 | `tests/` | prove automatiche e immagini di prova |

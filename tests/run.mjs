@@ -105,6 +105,17 @@ try {
   const erased = await page.evaluate(() => { const S = window.__pageturn.S; return S.pages.get(S.project.order[2]).params.erase.length; });
   check(erased === 1, 'tratto della gomma salvato');
 
+  // pagina curva: Distendi
+  await page.click('.th >> nth=3');
+  await page.waitForSelector('#pv[src]');
+  await page.click('[data-a="dewarp"]');
+  await page.waitForFunction(() => document.querySelector('#busy') && !document.querySelector('#busy').hidden, null, { timeout: 5000 }).catch(() => {});
+  await page.waitForFunction(() => document.querySelector('#busy').hidden, null, { timeout: 90000 });
+  await shot('09b-distendi');
+  await page.click('[data-a="done"]');
+  await page.waitForSelector('#grid');
+  check(await page.evaluate(() => { const S = window.__pageturn.S; return S.pages.get(S.project.order[3]).params.dewarp === true; }), 'pagina distesa (UVDoc)');
+
   // dividi
   await page.click('.th >> nth=0');
   await page.waitForSelector('#pv[src]');

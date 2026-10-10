@@ -38,7 +38,7 @@ for (const s of sides) {
 const files = readdirSync(dir).filter((f) => /\.(jpg|png)$/.test(f) && (!only || f.includes(only))).sort();
 console.log('pagina'.padEnd(30), 'tesseract'.padEnd(16), ...sides.map((s) => `paddle@${s}`.padEnd(16)));
 for (const f of files) {
-  const ref = readFileSync(`${dir}/${f.replace(/(-hd|-foto|-curva|-piccola)?\.(jpg|png)$/, '')}.txt`, 'utf8');
+  const ref = readFileSync(`${dir}/${f.replace(/(-hd|-foto|-curva|-piccola|-distesa)?\.(jpg|png)$/, '')}.txt`, 'utf8');
   let t = performance.now();
   const { data } = await tess.recognize(`${dir}/${f}`);
   const row = [`${(cer(data.text, ref) * 100).toFixed(1)}% ${Math.round(performance.now() - t)}ms`];

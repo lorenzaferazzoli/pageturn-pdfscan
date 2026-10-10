@@ -175,7 +175,7 @@ img { -webkit-user-drag: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .toolbar { display: flex; justify-content: space-around; padding: 8px 6px calc(env(safe-area-inset-bottom) + 10px); border-top: 0.5px solid var(--sep); background: var(--bg); }
-.tool { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11.5px; color: var(--text-2); min-width: 58px; padding: 4px 2px; border-radius: 10px; }
+.tool { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; color: var(--text-2); min-width: 48px; padding: 4px 2px; border-radius: 10px; }
 .tool .ic { color: var(--text); width: 24px; height: 24px; }
 .tool.on { color: var(--accent); }
 .tool.on .ic { color: var(--accent); }

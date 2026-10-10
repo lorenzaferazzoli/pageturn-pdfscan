@@ -441,6 +441,7 @@ async function project() {
       : mode === 'select'
         ? `<div class="toolbar"><button class="tool" data-a="srotate">${icon('rotate-clockwise')}Ruota</button>
            <button class="tool" data-a="sfilter">${icon('adjustments-horizontal')}Filtro</button>
+           <button class="tool" data-a="sdewarp">${icon('wave-sine')}Distendi</button>
            <button class="tool danger" data-a="sdelete">${icon('trash')}Elimina</button></div>`
         : `<div class="modehint" style="padding-bottom:calc(env(safe-area-inset-bottom) + 16px)">Tieni premuta una pagina e trascinala nella nuova posizione</div>`;
   const el = show(`
@@ -537,7 +538,7 @@ async function project() {
       S.select = false;
       toast(`${plural(n, 'pagina eliminata', 'pagine eliminate')}`);
       project();
-    } else if (a === 'srotate' || a === 'sfilter') {
+    } else if (a === 'srotate' || a === 'sfilter' || a === 'sdewarp') {
       if (!S.selected.size) return toast('Seleziona prima le pagine');
       const applyAll = async (fn) => {
         for (const id of S.selected) {
@@ -553,6 +554,11 @@ async function project() {
         project();
       };
       if (a === 'srotate') applyAll((pr) => { pr.rotation = ((pr.rotation || 0) + 1) % 4; pr.erase = []; });
+      else if (a === 'sdewarp') {
+        const all = [...S.selected].every((id) => S.pages.get(id).params.dewarp);
+        applyAll((pr) => { pr.dewarp = !all; pr.erase = []; });
+        toast(all ? 'Pagine non più distese' : 'Distendo le pagine curve in background', null, 2600);
+      }
       else {
         menuSheet('Filtro per le pagine selezionate', FILTER_LIST.map(([k, label]) => ({
           label, icon: 'adjustments-horizontal', run: async () => {
@@ -954,6 +960,7 @@ async function editor(pageId) {
         <button class="tool" data-a="crop">${icon('crop')}Ritaglia</button>
         <button class="tool" data-a="split">${icon('columns-2')}Dividi</button>
         <button class="tool" data-a="rotate">${icon('rotate-clockwise')}Ruota</button>
+        <button class="tool ${params.dewarp ? 'on' : ''}" data-a="dewarp">${icon('wave-sine')}Distendi</button>
         <button class="tool" data-a="erase">${icon('eraser')}Gomma</button>
         <button class="tool" data-a="redo">${icon('camera-rotate')}Rifai</button>
         <button class="tool" data-a="more">${icon('dots')}Altro</button>
@@ -1170,13 +1177,23 @@ async function editor(pageId) {
       params.rotation = ((params.rotation || 0) + 1) % 4;
       [pw, ph] = [ph, pw];
       change();
+    } else if (a === 'dewarp') {
+      params.dewarp = !params.dewarp;
+      t.classList.toggle('on', params.dewarp);
+      // i tratti della gomma erano sulla pagina non distesa
+      params.erase = [];
+      if (params.dewarp && !(await db.kvGet('uvLoaded', false))) {
+        toast('Scarico il modello per le pagine curve (31 MB), solo la prima volta', null, 5000);
+        db.kvSet('uvLoaded', true);
+      }
+      change();
     } else if (a === 'split') splitPage();
     else if (a === 'redo') { await commit(); camera({ replaceId: page.id }); }
     else if (a === 'more') {
       menuSheet(`Pagina ${idx + 1}`, [
         { label: 'Nuova pagina dopo questa', icon: 'square-plus', run: async () => { await commit(); pickPhotos({ index: idx + 1 }); } },
         { label: 'Ripristina la foto originale', icon: 'arrow-back-up', run: () => {
-          Object.assign(params, { quad: FULL_QUAD, rotation: 0, filter: 'original', brightness: 0, contrast: 0, erase: [] });
+          Object.assign(params, { quad: FULL_QUAD, rotation: 0, filter: 'original', brightness: 0, contrast: 0, erase: [], dewarp: false });
           dirty = true;
           toView(true);
         } },
