@@ -2,7 +2,7 @@
 
 Scanner di libri in PDF che gira nel browser del telefono. Niente app store, niente account, niente cloud di terzi: è una web app che si installa sulla schermata Home, funziona offline ed è open source.
 
-**Provala:** https://lorenzaferazzoli.github.io/pageturn/
+**Provala:** https://lorenzaferazzoli.github.io/pageturn-pdfscan/
 
 ![Schermate di Pageturn](docs/schermate.png)
 
@@ -23,7 +23,7 @@ Scanner di libri in PDF che gira nel browser del telefono. Niente app store, nie
 
 ## Installarla su iPhone
 
-1. Apri https://lorenzaferazzoli.github.io/pageturn/ in **Safari**.
+1. Apri https://lorenzaferazzoli.github.io/pageturn-pdfscan/ in **Safari**.
 2. Tocca **Condividi**, poi **Aggiungi alla schermata Home**.
 3. Apri Pageturn dall'icona e consenti l'accesso alla fotocamera.
 
@@ -38,8 +38,8 @@ Il server incluso serve l'app e riceve il backup automatico delle pagine. Non ha
 **Con Node 18 o superiore**
 
 ```sh
-git clone https://github.com/lorenzaferazzoli/pageturn.git
-cd pageturn
+git clone https://github.com/lorenzaferazzoli/pageturn-pdfscan.git
+cd pageturn-pdfscan
 PAGETURN_TOKEN=un-codice-segreto node server/server.js
 ```
 

@@ -7,7 +7,7 @@ import { renderPage, detectPage } from './jobs.js';
 import { splitQuad, FULL_QUAD } from './proc.js';
 
 export const VERSION = '1.0.0';
-export const REPO = 'https://github.com/lorenzaferazzoli/pageturn';
+export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------
 const $ = (s, el = document) => el.querySelector(s);
