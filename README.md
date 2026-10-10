@@ -31,6 +31,7 @@ Scanner di libri in PDF che gira nel browser del telefono. Niente app store, nie
 - **Esportazione** in PDF (tre livelli di qualità) o in immagini JPEG, con salvataggio diretto su File, iCloud Drive, Google Drive o Dropbox dal menu Condividi.
 - **Leggera e veloce.** L'elaborazione gira in background: nelle prove 120 pagine vengono elaborate senza bloccare l'interfaccia.
 - **Tema chiaro e scuro**, automatico o scelto a mano.
+- **Italiano, inglese e cinese.** L'interfaccia segue la lingua del telefono, oppure si sceglie in *Impostazioni → Lingua*.
 
 ## Installarla su iPhone
 
@@ -93,6 +94,7 @@ Le foto restano sul telefono e, se lo configuri, sul tuo server. L'OCR avviene s
 - *Distendi* lavora sulla foto attorno alla pagina e lascia intatte le pagine già piatte; con pieghe molto forti può deformare i bordi. Si vede subito nell'anteprima, si può disattivare e annullare.
 - Il riconoscimento della pagina funziona meglio con la carta su uno sfondo più scuro. Su sfondi chiari usa le linee dei bordi, ma se la pagina accanto è chiara quanto quella da scansionare conviene sistemare gli angoli a mano (con la lente).
 - Con la fotocamera dentro l'app la risoluzione è quella del video (fino a 4K, dipende dal telefono). Per le pagine con caratteri minuti c'è la fotocamera di iOS a piena risoluzione.
+- L'OCR legge solo le lingue con alfabeto latino: il testo cinese per ora non viene riconosciuto.
 - L'OCR sul telefono richiede qualche secondo a pagina (il motore *Preciso* circa il triplo di *Veloce*); per un libro intero conviene lasciare l'app aperta in carica. La prima volta scarica i modelli: circa 27 MB per *Preciso*, 10 MB per *Veloce*, 31 MB per *Distendi*.
 
 ## Quale OCR
@@ -119,6 +121,7 @@ npm start                    # http://localhost:8080
 npm test                     # prova completa in Chromium con una finta fotocamera
 node tests/stress.mjs 120    # prova di carico
 node tests/stabilizer.mjs    # stabilizzazione: ogni scatto deve risultare nitido
+node tests/i18n.mjs          # traduzioni: niente italiano nelle schermate in inglese e cinese
 node tests/detect-check.mjs  # disegna il riconoscimento delle pagine su tests/out/
 npm run vendor               # dopo aver aggiornato le librerie
 sh scripts/paddle-models.sh  # per riscaricare i modelli PaddleOCR
@@ -126,7 +129,7 @@ sh scripts/paddle-models.sh  # per riscaricare i modelli PaddleOCR
 
 | Cartella | Contenuto |
 |---|---|
-| `js/` | app (`app.js`), archivio (`db.js`), fotocamera, scatto automatico e stabilizzazione (`camera.js`, `detect.js`), elaborazione immagini (`proc.js`, `render.js`, nel worker), coda (`queue.js`), OCR (`ocr.js`, `paddle.js`, `paddle-worker.js`), PDF e backup (`export.js`), backup sul server (`sync.js`) |
+| `js/` | app (`app.js`), traduzioni (`i18n.js`), archivio (`db.js`), fotocamera, scatto automatico e stabilizzazione (`camera.js`, `detect.js`), elaborazione immagini (`proc.js`, `render.js`, nel worker), coda (`queue.js`), OCR (`ocr.js`, `paddle.js`, `paddle-worker.js`), PDF e backup (`export.js`), backup sul server (`sync.js`) |
 | `server/` | server Node senza dipendenze |
 | `vendor/` | librerie incluse (vedi [THIRD-PARTY.md](THIRD-PARTY.md)) |
 | `tests/` | prove automatiche e immagini di prova |

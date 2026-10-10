@@ -1,6 +1,7 @@
 // Backup automatico su un server Pageturn (vedi server/server.js).
 // Ogni foto originale viene caricata appena salvata; se la rete manca, si ritenta.
 import * as db from './db.js';
+import { tr } from './i18n.js';
 
 export const events = new EventTarget();
 let cfg = { enabled: false, url: '', token: '' };
@@ -52,10 +53,10 @@ export async function health(url = base(), token = cfg.token) {
     headers: token ? { 'x-pageturn-token': token } : {},
     cache: 'no-store',
   });
-  if (!r.ok) throw new Error(r.status === 401 ? 'Codice di accesso errato' : `Errore ${r.status}`);
+  if (!r.ok) throw new Error(r.status === 401 ? tr('Codice di accesso errato') : tr('Errore {status}', { status: r.status }));
   const j = await r.json();
-  if (!j.pageturn) throw new Error('Non è un server Pageturn');
-  if (j.auth && !j.authorized) throw new Error('Codice di accesso errato');
+  if (!j.pageturn) throw new Error(tr('Non è un server Pageturn'));
+  if (j.auth && !j.authorized) throw new Error(tr('Codice di accesso errato'));
   return j;
 }
 
@@ -70,7 +71,7 @@ export function kick() {
 
 async function put(path, body, type) {
   const r = await fetch(base() + path, { method: 'PUT', body, headers: headers({ 'content-type': type }) });
-  if (!r.ok) throw new Error(r.status === 401 ? 'Codice di accesso errato' : `Errore del server (${r.status})`);
+  if (!r.ok) throw new Error(r.status === 401 ? tr('Codice di accesso errato') : tr('Errore del server ({status})', { status: r.status }));
 }
 
 async function run() {
@@ -107,7 +108,7 @@ async function run() {
     state = { status: 'ok', pending: 0, error: '', at: Date.now() };
     emit();
   } catch (e) {
-    state = { status: 'error', pending: state.pending, error: navigator.onLine ? String(e.message || e) : 'Sei offline' };
+    state = { status: 'error', pending: state.pending, error: navigator.onLine ? String(e.message || e) : tr('Sei offline') };
     emit();
     timer = setTimeout(run, 15000);
   } finally {
@@ -125,17 +126,17 @@ export async function pushProject(project) {
 
 export async function remoteProjects() {
   const r = await fetch(`${base()}/api/projects`, { headers: headers(), cache: 'no-store' });
-  if (!r.ok) throw new Error(`Errore ${r.status}`);
+  if (!r.ok) throw new Error(tr('Errore {status}', { status: r.status }));
   return r.json();
 }
 
 // Scarica dal server un progetto intero come nuovo progetto locale.
 export async function restore(remoteId, onProgress) {
   const r = await fetch(`${base()}/api/projects/${remoteId}`, { headers: headers(), cache: 'no-store' });
-  if (!r.ok) throw new Error(`Errore ${r.status}`);
+  if (!r.ok) throw new Error(tr('Errore {status}', { status: r.status }));
   const { project: rp, pages } = await r.json();
   const local = await db.getProject(rp.id);
-  const project = local ? await db.createProject(`${rp.name} (dal server)`) : await db.putProject({ ...rp, order: [] });
+  const project = local ? await db.createProject(tr('{name} (dal server)', { name: rp.name })) : await db.putProject({ ...rp, order: [] });
   const byId = new Map(pages.map((p) => [p.id, p]));
   const order = (rp.order || []).filter((id) => byId.has(id));
   let i = 0;

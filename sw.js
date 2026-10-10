@@ -1,5 +1,5 @@
 // Service worker: l'app funziona offline. Il motore OCR viene messo in cache al primo uso.
-const VERSION = 'pageturn-1.5.2';
+const VERSION = 'pageturn-1.6.0';
 const SHELL = [
   './',
   'index.html',
@@ -16,6 +16,7 @@ const SHELL = [
   'js/jobs.js',
   'js/proc-worker.js',
   'js/icons.js',
+  'js/i18n.js',
   'js/export.js',
   'js/ocr.js',
   'js/paddle.js',

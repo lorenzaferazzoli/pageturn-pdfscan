@@ -8,6 +8,7 @@ import * as db from './db.js';
 import { resizeImage } from './jobs.js';
 import { recognize, terminate, engineKey } from './ocr.js';
 import { PROC } from './queue.js';
+import { tr } from './i18n.js';
 
 export const QUALITY = {
   low: { maxSide: 1600, quality: 0.65, label: 'Bassa' },
@@ -21,7 +22,7 @@ const MARGIN = 28.35; // 1 cm
 
 async function pageImage(id, q) {
   const proc = await db.getBlob(`${id}:proc`);
-  if (!proc) throw new Error('Pagina non ancora elaborata');
+  if (!proc) throw new Error(tr('Pagina non ancora elaborata'));
   if (q === 'high') return { blob: proc };
   return resizeImage(proc, QUALITY[q]);
 }
@@ -202,10 +203,10 @@ export async function buildBackup(project, onProgress) {
 // Ripristina un backup come nuovo progetto (non sovrascrive nulla di esistente).
 export async function importBackup(file) {
   const z = unzipSync(new Uint8Array(await file.arrayBuffer()));
-  if (!z['progetto.json']) throw new Error('Questo file non è un backup di Pageturn');
+  if (!z['progetto.json']) throw new Error(tr('Questo file non è un backup di Pageturn'));
   const meta = JSON.parse(strFromU8(z['progetto.json']));
   const existing = await db.getProject(meta.project.id);
-  const project = await db.createProject(existing ? `${meta.project.name} (ripristino)` : meta.project.name);
+  const project = await db.createProject(existing ? tr('{name} (ripristino)', { name: meta.project.name }) : meta.project.name);
   const items = [];
   const newId = new Map(meta.pages.map((p) => [p.id, db.uid()]));
   const written = new Set();
@@ -229,8 +230,9 @@ export async function importBackup(file) {
   return fresh;
 }
 
+// Nome di file: senza accenti, ma con le lettere di ogni alfabeto (un titolo cinese resta cinese).
 export function slug(s) {
-  return (s || 'scansione').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'scansione';
+  return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC').replace(/[^\p{L}\p{N}\p{M}]+/gu, '-').replace(/^-|-$/g, '').toLowerCase() || tr('scansione');
 }
 
 export { PROC };

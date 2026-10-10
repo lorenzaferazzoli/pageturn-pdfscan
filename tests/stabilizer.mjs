@@ -15,7 +15,7 @@ execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-framerate', '15', '-i', `$
 const server = spawn('node', ['server/server.js'], { env: { ...process.env, PORT: 8096, DATA_DIR: S + '/d6' }, stdio: 'ignore' });
 await new Promise((r) => setTimeout(r, 500));
 const b = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-video-capture=${S}/burst.y4m`] });
-const p = await (await b.newContext({ viewport: { width: 390, height: 844 }, permissions: ['camera'] })).newPage();
+const p = await (await b.newContext({ viewport: { width: 390, height: 844 }, permissions: ['camera'], locale: 'it-IT' })).newPage();
 p.on('pageerror', (e) => console.log('ERR', e.message));
 await p.goto('http://localhost:8096/');
 await p.click('text=Nuovo libro'); await p.fill('.sheet input', 'x'); await p.click('text=Crea e scansiona');

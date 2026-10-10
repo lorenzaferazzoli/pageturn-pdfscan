@@ -6,8 +6,6 @@ A book scanner that turns pages into PDFs, running in your phone's browser. No a
 
 **Try it:** https://lorenzaferazzoli.github.io/pageturn-pdfscan/
 
-The app interface is in Italian.
-
 ![Pageturn screenshots](docs/schermate.png)
 
 ## What it does
@@ -33,6 +31,7 @@ The app interface is in Italian.
 - **Export** to PDF (three quality levels) or JPEG images. From the Share menu you can save straight to Files, iCloud Drive, Google Drive or Dropbox.
 - **Light and fast.** Processing runs in the background: in tests, 120 pages are processed without ever blocking the interface.
 - **Light and dark theme**, automatic or chosen by hand.
+- **Italian, English and Chinese.** The interface follows your phone's language, or you can pick one under *Settings → Language*.
 
 ## Installing on iPhone
 
@@ -42,9 +41,9 @@ The app interface is in Italian.
 
 Installing matters. Safari may delete data from sites you haven't visited in 7 days, but apps added to the Home Screen are exempt. Since iOS 16.4 you can add the app from any browser. Once installed, it opens from its icon and runs on its own, separate from the browser you added it from.
 
-Note: the installed app and the same page opened in a browser have **separate storage**. If you already scanned inside the browser, export the backup (.zip) there and import it into the installed app (*Impostazioni → Importa un backup*).
+Note: the installed app and the same page opened in a browser have **separate storage**. If you already scanned inside the browser, export the backup (.zip) there and import it into the installed app (*Settings → Import a backup*).
 
-Under *Impostazioni → Informazioni → Ambiente* the app shows where it's running: browser, engine, offline support and multithreaded OCR.
+Under *Settings → About → Environment* the app shows where it's running: browser, engine, offline support and multithreaded OCR.
 
 On Android it works the same way with Chrome (menu ⋮ → *Install app*).
 
@@ -68,7 +67,7 @@ docker compose up -d   # set PAGETURN_TOKEN in docker-compose.yml first
 
 Backups are stored in `./data/<book>/pages/` as original JPEGs plus one .json file per page.
 
-In the app, open **Impostazioni → Backup automatico sul server**, enter the address and the code, then tap *Verifica connessione*. If you open the app straight from your server and no access code is set, backup turns on by itself.
+In the app, open **Settings → Automatic backup to your server**, enter the address and the code, then tap *Test connection*. If you open the app straight from your server and no access code is set, backup turns on by itself.
 
 **HTTPS is required.** Browsers only allow camera access over HTTPS (or on `localhost`). The simplest options:
 
@@ -95,6 +94,7 @@ Photos stay on your phone and, if you set it up, on your server. OCR runs on the
 - *Unwarp* works on the photo around the page and leaves already-flat pages untouched. With very strong folds it can distort the page edges. You see it right away in the preview, and you can switch it off or undo it.
 - Page detection works best with the paper on a darker background. On light backgrounds it relies on the page edges, but if the facing page is as light as the one you're scanning, it's better to adjust the corners by hand (with the loupe).
 - With the in-app camera, resolution is that of the video stream (up to 4K, depending on the phone). For pages with very small print, use the native iOS camera at full resolution.
+- OCR reads Latin-script languages only: Chinese text isn't recognized yet.
 - On-device OCR takes a few seconds per page, and the *Accurate* engine takes about three times as long as *Fast*. For a whole book, keep the app open while charging. The models are downloaded the first time: about 27 MB for *Accurate*, 10 MB for *Fast* and 31 MB for *Unwarp*.
 
 ## Which OCR engine
@@ -121,6 +121,7 @@ npm start                    # http://localhost:8080
 npm test                     # full run in Chromium with a fake camera
 node tests/stress.mjs 120    # load test
 node tests/stabilizer.mjs    # stabilization: every shot must come out sharp
+node tests/i18n.mjs          # translations: nothing left in Italian in the English and Chinese screens
 node tests/detect-check.mjs  # draws page detection results into tests/out/
 npm run vendor               # after updating the libraries
 sh scripts/paddle-models.sh  # to download the PaddleOCR models again
@@ -128,7 +129,7 @@ sh scripts/paddle-models.sh  # to download the PaddleOCR models again
 
 | Folder | Contents |
 |---|---|
-| `js/` | app (`app.js`), storage (`db.js`), camera, automatic capture and stabilization (`camera.js`, `detect.js`), image processing (`proc.js`, `render.js`, in a worker), queue (`queue.js`), OCR (`ocr.js`, `paddle.js`, `paddle-worker.js`), PDF and backup (`export.js`), server backup (`sync.js`) |
+| `js/` | app (`app.js`), translations (`i18n.js`), storage (`db.js`), camera, automatic capture and stabilization (`camera.js`, `detect.js`), image processing (`proc.js`, `render.js`, in a worker), queue (`queue.js`), OCR (`ocr.js`, `paddle.js`, `paddle-worker.js`), PDF and backup (`export.js`), server backup (`sync.js`) |
 | `server/` | dependency-free Node server |
 | `vendor/` | bundled libraries (see [THIRD-PARTY.md](THIRD-PARTY.md)) |
 | `tests/` | automated tests and test images |

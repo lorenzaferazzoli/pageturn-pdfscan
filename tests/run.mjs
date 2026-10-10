@@ -31,7 +31,7 @@ const browser = await chromium.launch({
 });
 const ctx = await browser.newContext({
   viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
-  permissions: ['camera'], acceptDownloads: true,
+  permissions: ['camera'], acceptDownloads: true, locale: 'it-IT', // i testi cercati sono in italiano
 });
 const page = await ctx.newPage();
 const errors = [];

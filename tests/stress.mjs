@@ -5,7 +5,7 @@ const N = +process.argv[2] || 120;
 const server = spawn('node', ['server/server.js'], { env: { ...process.env, PORT: 8098, DATA_DIR: 'tests/out/d4' }, stdio: 'ignore' });
 await new Promise((r) => setTimeout(r, 500));
 const b = await chromium.launch();
-const p = await b.newPage({ viewport: { width: 390, height: 844 } });
+const p = await b.newPage({ viewport: { width: 390, height: 844 }, locale: 'it-IT' });
 await p.goto('http://localhost:8098/');
 await p.waitForSelector('text=Nuovo libro');
 await p.click('text=Nuovo libro');

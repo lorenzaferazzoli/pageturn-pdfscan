@@ -1,8 +1,8 @@
 {
-  "name": "Pageturn — scanner di libri",
+  "name": "Pageturn",
   "short_name": "Pageturn",
-  "description": "Scansiona libri in PDF dal telefono: offline, con OCR, open source.",
-  "lang": "it",
+  "description": "Scan books to PDF from your phone: offline, with OCR, open source.",
+  "lang": "en",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

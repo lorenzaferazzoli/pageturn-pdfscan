@@ -6,8 +6,9 @@ import { icon } from './icons.js';
 import { renderPage, detectPage } from './jobs.js';
 import { splitQuad, FULL_QUAD, homography } from './proc.js';
 import { ENGINES as OCR_ENGINES } from './ocr.js';
+import { tr, trp, sp, locale, setLang, langPref, LANGS } from './i18n.js';
 
-export const VERSION = '1.5.2';
+export const VERSION = '1.6.0';
 export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------
@@ -19,23 +20,25 @@ const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform 
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 
 function ago(t) {
-  if (!t) return 'mai';
+  if (!t) return tr('mai');
   const s = (Date.now() - t) / 1000;
-  if (s < 50) return 'ora';
-  if (s < 3600) return `${Math.round(s / 60)} min fa`;
-  if (s < 86400) return `${Math.round(s / 3600)} ${Math.round(s / 3600) === 1 ? 'ora' : 'ore'} fa`;
-  if (s < 172800) return 'ieri';
-  return new Date(t).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+  if (s < 50) return tr('ora');
+  if (s < 3600) return tr('{n} min fa', { n: Math.round(s / 60) });
+  if (s < 86400) return Math.round(s / 3600) === 1 ? tr('1 ora fa') : tr('{n} ore fa', { n: Math.round(s / 3600) });
+  if (s < 172800) return tr('ieri');
+  return new Date(t).toLocaleDateString(locale(), { day: 'numeric', month: 'short' });
 }
 
 function bytes(n) {
+  const f = (v, d) => v.toLocaleString(locale(), { minimumFractionDigits: d, maximumFractionDigits: d });
   if (!n) return '0 MB';
   if (n < 1e6) return `${Math.max(1, Math.round(n / 1e3))} kB`;
-  if (n < 1e9) return `${(n / 1e6).toFixed(n < 1e7 ? 1 : 0).replace('.', ',')} MB`;
-  return `${(n / 1e9).toFixed(1).replace('.', ',')} GB`;
+  if (n < 1e9) return `${f(n / 1e6, n < 1e7 ? 1 : 0)} MB`;
+  return `${f(n / 1e9, 1)} GB`;
 }
 
-const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+// «3 pagine»: le forme singolare e plurale italiane sono la chiave della traduzione
+const plural = (n, one, many) => trp(n, one, many);
 
 function toast(msg, action, ms = 3800) {
   const el = document.createElement('div');
@@ -68,7 +71,7 @@ function sheet(html, { onClose, dismissable = true } = {}) {
   return { el: wrap.firstElementChild, close };
 }
 
-const shead = (title) => `<div class="shead"><h2>${esc(title)}</h2><button class="close" data-close aria-label="Chiudi">${icon('x')}</button></div>`;
+const shead = (title) => `<div class="shead"><h2>${esc(title)}</h2><button class="close" data-close aria-label="${tr('Chiudi')}">${icon('x')}</button></div>`;
 
 function confirmSheet(title, text, ok, danger = false) {
   return new Promise((resolve) => {
@@ -76,7 +79,7 @@ function confirmSheet(title, text, ok, danger = false) {
     const s = sheet(
       `${shead(title)}<p style="margin:0;color:var(--text-2)">${esc(text)}</p>
        <div class="actions"><button class="btn ${danger ? 'danger' : 'primary'}" data-ok>${esc(ok)}</button>
-       <button class="btn" data-close>Annulla</button></div>`,
+       <button class="btn" data-close>${tr('Annulla')}</button></div>`,
       { onClose: () => resolve(v) },
     );
     $('[data-ok]', s.el).onclick = () => { v = true; s.close(); };
@@ -136,8 +139,8 @@ function fileReadySheet(blob, name, title, onSaved) {
   const s = sheet(`${shead(title)}
     <div class="card"><div class="li"><span>${esc(name)}</span><span class="r">${bytes(blob.size)}</span></div></div>
     <div class="actions">
-      <button class="btn primary" data-share>${icon('share-2')} Salva in File o Drive</button>
-      <button class="btn" data-dl>${icon('download')} Scarica</button>
+      <button class="btn primary" data-share>${icon('share-2')} ${tr('Salva in File o Drive')}</button>
+      <button class="btn" data-dl>${icon('download')} ${tr('Scarica')}</button>
     </div>`);
   $('[data-share]', s.el).onclick = async () => { if (await shareFile(blob, name)) { onSaved && onSaved(); s.close(); } };
   $('[data-dl]', s.el).onclick = () => { download(blob, name); onSaved && onSaved(); s.close(); };
@@ -149,6 +152,11 @@ async function applyTheme(t) {
   else delete document.documentElement.dataset.theme;
   try { localStorage.setItem('pageturn-theme', t); } catch { /* privato */ }
   await db.kvSet('theme', t);
+}
+
+async function applyLang(l) {
+  setLang(l);
+  await db.kvSet('lang', l);
 }
 
 // ---------- miniature ----------
@@ -260,7 +268,7 @@ async function importFiles(files, { replaceId, index } = {}) {
   if (!files.length) return [];
   const list = [...files].filter((f) => f.type.startsWith('image/') || /\.(jpe?g|png|heic|webp)$/i.test(f.name));
   if (!list.length) return [];
-  const t = list.length > 1 ? toastProgress(`Importo ${list.length} foto…`) : null;
+  const t = list.length > 1 ? toastProgress(tr('Importo {n} foto…', { n: list.length })) : null;
   const ids = [];
   try {
     for (let i = 0; i < list.length; i++) {
@@ -272,7 +280,7 @@ async function importFiles(files, { replaceId, index } = {}) {
         det = r.found;
       } catch {
         // formato non leggibile dal browser (es. HEIC su browser non Apple)
-        toast('Questo formato di immagine non è supportato');
+        toast(tr('Questo formato di immagine non è supportato'));
         continue;
       }
       const items = pagesFor(blob, det, !replaceId && S.project.double);
@@ -281,7 +289,7 @@ async function importFiles(files, { replaceId, index } = {}) {
         index: index != null ? index + ids.length : undefined,
       });
       for (const it of items) { S.pages.set(it.page.id, it.page); queue.enqueue(it.page.id); ids.push(it.page.id); }
-      t && t.set(`Importo ${i + 1} di ${list.length}…`);
+      t && t.set(tr('Importo {i} di {n}…', { i: i + 1, n: list.length }));
     }
   } catch (e) {
     storageError(e);
@@ -318,10 +326,10 @@ function toastProgress(msg) {
 function storageError(e) {
   console.error(e);
   if (e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message))) {
-    sheet(`${shead('Spazio esaurito')}<p style="color:var(--text-2);margin:0">Il telefono non ha più spazio per le scansioni. Esporta un backup o un PDF e libera spazio eliminando i libri già esportati.</p>
-      <div class="actions"><button class="btn" data-close>Ok</button></div>`);
+    sheet(`${shead(tr('Spazio esaurito'))}<p style="color:var(--text-2);margin:0">${tr('Il telefono non ha più spazio per le scansioni. Esporta un backup o un PDF e libera spazio eliminando i libri già esportati.')}</p>
+      <div class="actions"><button class="btn" data-close>${tr('Ok')}</button></div>`);
   } else {
-    toast('Salvataggio non riuscito. Riprova.');
+    toast(tr('Salvataggio non riuscito. Riprova.'));
   }
 }
 
@@ -335,21 +343,20 @@ async function home() {
   const hideBanner = await db.kvGet('hideInstall', false);
   const el = show(`
     <div class="nav"><div class="side"></div><div class="title"></div>
-      <div class="side r"><button class="iconbtn" data-a="settings" aria-label="Impostazioni">${icon('settings')}</button></div></div>
+      <div class="side r"><button class="iconbtn" data-a="settings" aria-label="${tr('Impostazioni')}">${icon('settings')}</button></div></div>
     <div class="scroll">
       <div class="head"><h1 class="large">Pageturn</h1></div>
-      ${!standalone && !hideBanner ? `<div class="banner">${icon('device-floppy')}<div><b>Aggiungi Pageturn alla schermata Home</b>
-        ${isIOS ? 'Dal pulsante Condividi del browser (Safari, Opera, Chrome…) scegli «Aggiungi alla schermata Home».' : 'Installa l’app dal menu del browser.'}
-        Così le scansioni non vengono cancellate dal browser.</div><button class="x" data-a="hidebanner" aria-label="Nascondi">${icon('x')}</button></div>` : ''}
+      ${!standalone && !hideBanner ? `<div class="banner">${icon('device-floppy')}<div><b>${tr('Aggiungi Pageturn alla schermata Home')}</b>
+        ${isIOS ? tr('Dal pulsante Condividi del browser (Safari, Opera, Chrome…) scegli «Aggiungi alla schermata Home».') : tr('Installa l’app dal menu del browser.')}${sp()}${tr('Così le scansioni non vengono cancellate dal browser.')}</div><button class="x" data-a="hidebanner" aria-label="${tr('Nascondi')}">${icon('x')}</button></div>` : ''}
       ${projects.length ? `<div class="group">${projects.map((p) => `
         <div class="proj" data-a="open" data-id="${p.id}" role="button" tabindex="0">
           <div class="cover" data-cover="${p.order[0] || ''}">${icon('book-2')}</div>
           <div class="meta"><div class="name">${esc(p.name)}</div><div class="sub">${plural(p.order.length, 'pagina', 'pagine')} · ${ago(p.updated)}</div></div>
-          <button class="more" data-a="pmenu" data-id="${p.id}" aria-label="Opzioni">${icon('dots')}</button>
+          <button class="more" data-a="pmenu" data-id="${p.id}" aria-label="${tr('Opzioni')}">${icon('dots')}</button>
         </div>`).join('')}</div>`
-        : `<div class="empty"><div class="big">${icon('book')}</div><h2>Inizia il tuo primo libro</h2><p>Ogni pagina viene salvata appena la scatti, anche se l’app si chiude.</p></div>`}
+        : `<div class="empty"><div class="big">${icon('book')}</div><h2>${tr('Inizia il tuo primo libro')}</h2><p>${tr('Ogni pagina viene salvata appena la scatti, anche se l’app si chiude.')}</p></div>`}
     </div>
-    <div class="bar"><button class="btn primary" data-a="new">${icon('plus')} Nuovo libro</button></div>`);
+    <div class="bar"><button class="btn primary" data-a="new">${icon('plus')} ${tr('Nuovo libro')}</button></div>`);
 
   // copertine
   for (const c of $$('[data-cover]', el)) {
@@ -368,10 +375,10 @@ async function home() {
     if (!t) return;
     const a = t.dataset.a;
     if (a === 'new') {
-      const d = new Date().toLocaleDateString('it-IT', { day: 'numeric', month: 'long' });
-      const name = await promptSheet('Nuovo libro', '', 'Crea e scansiona', `Libro del ${d}`);
+      const d = new Date().toLocaleDateString(locale(), { day: 'numeric', month: 'long' });
+      const name = await promptSheet(tr('Nuovo libro'), '', tr('Crea e scansiona'), tr('Libro del {d}', { d }));
       if (name === null) return;
-      const p = await db.createProject(name || `Libro del ${d}`);
+      const p = await db.createProject(name || tr('Libro del {d}', { d }));
       await loadProject(p.id);
       camera();
     } else if (a === 'open') {
@@ -392,25 +399,25 @@ async function home() {
 
 function projectMenu(p, after) {
   menuSheet(p.name, [
-    { label: 'Rinomina', icon: 'pencil', run: async () => {
-      const n = await promptSheet('Rinomina', p.name, 'Salva');
+    { label: tr('Rinomina'), icon: 'pencil', run: async () => {
+      const n = await promptSheet(tr('Rinomina'), p.name, tr('Salva'));
       if (n) { p.name = n; p.updated = Date.now(); await db.putProject(p); sync.pushProject(p); after(); }
     } },
-    { label: 'Esporta backup (.zip)', icon: 'file-zip', run: () => backupFlow(p) },
-    { label: 'Elimina libro', icon: 'trash', cls: 'danger', run: async () => {
-      const ok = await confirmSheet('Eliminare il libro?', `«${p.name}» e le sue ${p.order.length} pagine verranno eliminati da questo dispositivo. Il backup sul server, se c’è, resta.`, 'Elimina', true);
-      if (ok) { await db.deleteProject(p.id); toast('Libro eliminato'); home(); }
+    { label: tr('Esporta backup (.zip)'), icon: 'file-zip', run: () => backupFlow(p) },
+    { label: tr('Elimina libro'), icon: 'trash', cls: 'danger', run: async () => {
+      const ok = await confirmSheet(tr('Eliminare il libro?'), tr('«{name}» e le sue {n} pagine verranno eliminati da questo dispositivo. Il backup sul server, se c’è, resta.', { name: p.name, n: p.order.length }), tr('Elimina'), true);
+      if (ok) { await db.deleteProject(p.id); toast(tr('Libro eliminato')); home(); }
     } },
   ]);
 }
 
 async function backupFlow(p) {
-  const t = toastProgress('Preparo il backup…');
+  const t = toastProgress(tr('Preparo il backup…'));
   try {
     const { buildBackup, slug } = await import('./export.js');
-    const blob = await buildBackup(p, ({ done, total }) => t.set(`Preparo il backup… ${done}/${total}`));
+    const blob = await buildBackup(p, ({ done, total }) => t.set(`${tr('Preparo il backup…')} ${done}/${total}`));
     t.done();
-    fileReadySheet(blob, `${slug(p.name)}-backup.zip`, 'Backup pronto', async () => {
+    fileReadySheet(blob, `${slug(p.name)}-backup.zip`, tr('Backup pronto'), async () => {
       const fresh = await db.getProject(p.id);
       fresh.lastBackup = Date.now();
       fresh.pagesSinceBackup = 0;
@@ -419,7 +426,7 @@ async function backupFlow(p) {
     });
   } catch (e) {
     t.done();
-    toast(`Backup non riuscito: ${e.message}`);
+    toast(tr('Backup non riuscito: {e}', { e: e.message }));
   }
 }
 
@@ -451,7 +458,7 @@ function thumbHTML(p, i, med) {
     ${p.status === 'pending' && hasThumb ? `<span class="pend">${icon('loader-2', 'spinner')}</span>` : ''}
     ${warn ? '<span class="badge">!</span>' : ''}
     ${S.select ? `<span class="check">${sel ? icon('check') : ''}</span>` : ''}
-    <div class="n">${i + 1}${p.status === 'error' ? ' · errore' : warn ? ' · sfocata' : ''}</div></button>`;
+    <div class="n">${i + 1}${p.status === 'error' ? ` · ${tr('errore')}` : warn ? ` · ${tr('sfocata')}` : ''}</div></button>`;
 }
 
 function statusHTML() {
@@ -461,10 +468,10 @@ function statusHTML() {
   const st = sync.getState();
   let dot = 'ok';
   const parts = [plural(n, 'pagina', 'pagine')];
-  if (pend) { parts.push(`elaboro ${pend}`); dot = 'busy'; } else parts.push('tutto salvato');
-  if (st.status === 'syncing') { parts.push(`invio al server (${st.pending})`); dot = 'busy'; }
-  else if (st.status === 'ok') parts.push('copia sul server');
-  else if (st.status === 'error') { parts.push('server non raggiungibile'); if (dot !== 'busy') dot = 'warn'; }
+  if (pend) { parts.push(tr('elaboro {n}', { n: pend })); dot = 'busy'; } else parts.push(tr('tutto salvato'));
+  if (st.status === 'syncing') { parts.push(tr('invio al server ({n})', { n: st.pending })); dot = 'busy'; }
+  else if (st.status === 'ok') parts.push(tr('copia sul server'));
+  else if (st.status === 'error') { parts.push(tr('server non raggiungibile')); if (dot !== 'busy') dot = 'warn'; }
   return `<span class="dot ${dot === 'ok' ? '' : dot}"></span>${parts.join(' · ')}`;
 }
 
@@ -477,24 +484,24 @@ async function project() {
   const mode = S.reorder ? 'reorder' : S.select ? 'select' : 'normal';
   const nav =
     mode === 'normal'
-      ? `<div class="side"><button class="link" data-a="back">${icon('chevron-left')}Libri</button></div><div class="title"></div>
-         <div class="side r"><button class="iconbtn" data-a="import" aria-label="Importa foto">${icon('photo-plus')}</button>
-         <button class="iconbtn" data-a="select" aria-label="Seleziona">${icon('checkbox')}</button>
-         <button class="iconbtn" data-a="menu" aria-label="Altro">${icon('dots')}</button></div>`
+      ? `<div class="side"><button class="link" data-a="back">${icon('chevron-left')}${tr('Libri')}</button></div><div class="title"></div>
+         <div class="side r"><button class="iconbtn" data-a="import" aria-label="${tr('Importa foto')}">${icon('photo-plus')}</button>
+         <button class="iconbtn" data-a="select" aria-label="${tr('Seleziona')}">${icon('checkbox')}</button>
+         <button class="iconbtn" data-a="menu" aria-label="${tr('Altro')}">${icon('dots')}</button></div>`
       : mode === 'select'
-        ? `<div class="side"><button class="link" data-a="all">${S.selected.size === pages.length && pages.length ? 'Nessuna' : 'Tutte'}</button></div>
-           <div class="title">${S.selected.size ? plural(S.selected.size, 'selezionata', 'selezionate') : 'Seleziona pagine'}</div>
-           <div class="side r"><button class="link" data-a="done">Fine</button></div>`
-        : `<div class="side"></div><div class="title">Riordina</div><div class="side r"><button class="link" data-a="done">Fine</button></div>`;
+        ? `<div class="side"><button class="link" data-a="all">${S.selected.size === pages.length && pages.length ? tr('Nessuna') : tr('Tutte')}</button></div>
+           <div class="title">${S.selected.size ? plural(S.selected.size, 'selezionata', 'selezionate') : tr('Seleziona pagine')}</div>
+           <div class="side r"><button class="link" data-a="done">${tr('Fine')}</button></div>`
+        : `<div class="side"></div><div class="title">${tr('Riordina')}</div><div class="side r"><button class="link" data-a="done">${tr('Fine')}</button></div>`;
   const bottom =
     mode === 'normal'
-      ? `<div class="bar"><button class="btn primary" data-a="scan">${icon('camera')} Scansiona</button><button class="btn" data-a="export" ${pages.length ? '' : 'disabled'}>Esporta</button></div>`
+      ? `<div class="bar"><button class="btn primary" data-a="scan">${icon('camera')} ${tr('Scansiona')}</button><button class="btn" data-a="export" ${pages.length ? '' : 'disabled'}>${tr('Esporta')}</button></div>`
       : mode === 'select'
-        ? `<div class="toolbar"><button class="tool" data-a="srotate">${icon('rotate-clockwise')}Ruota</button>
-           <button class="tool" data-a="sfilter">${icon('adjustments-horizontal')}Filtro</button>
-           <button class="tool" data-a="sdewarp">${icon('wave-sine')}Distendi</button>
-           <button class="tool danger" data-a="sdelete">${icon('trash')}Elimina</button></div>`
-        : `<div class="modehint" style="padding-bottom:calc(env(safe-area-inset-bottom) + 16px)">Tieni premuta una pagina e trascinala nella nuova posizione</div>`;
+        ? `<div class="toolbar"><button class="tool" data-a="srotate">${icon('rotate-clockwise')}${tr('Ruota')}</button>
+           <button class="tool" data-a="sfilter">${icon('adjustments-horizontal')}${tr('Filtro')}</button>
+           <button class="tool" data-a="sdewarp">${icon('wave-sine')}${tr('Distendi')}</button>
+           <button class="tool danger" data-a="sdelete">${icon('trash')}${tr('Elimina')}</button></div>`
+        : `<div class="modehint" style="padding-bottom:calc(env(safe-area-inset-bottom) + 16px)">${tr('Tieni premuta una pagina e trascinala nella nuova posizione')}</div>`;
   const prevScroll = S.gridScroll || 0;
   const el = show(`
     <div class="nav">${nav}</div>
@@ -502,7 +509,7 @@ async function project() {
       <div class="head"><h1 class="large">${esc(P.name)}</h1><div class="status" id="st">${statusHTML()}</div></div>
       ${pages.length
         ? `<div class="grid ${mode === 'reorder' ? 'reorder' : ''}" id="grid">${pages.map((p, i) => thumbHTML(p, i, med)).join('')}</div>`
-        : `<div class="empty"><div class="big">${icon('camera')}</div><h2>Nessuna pagina</h2><p>Tocca Scansiona per iniziare, oppure importa foto dal rullino.</p></div>`}
+        : `<div class="empty"><div class="big">${icon('camera')}</div><h2>${tr('Nessuna pagina')}</h2><p>${tr('Tocca Scansiona per iniziare, oppure importa foto dal rullino.')}</p></div>`}
     </div>
     ${bottom}`);
 
@@ -571,31 +578,31 @@ async function project() {
       updateSelection(el, pages);
     } else if (a === 'menu') {
       menuSheet(P.name, [
-        { label: 'Riordina pagine', icon: 'arrows-move', run: () => { S.reorder = true; project(); } },
-        { label: 'Rinomina', icon: 'pencil', run: async () => {
-          const n = await promptSheet('Rinomina', P.name, 'Salva');
+        { label: tr('Riordina pagine'), icon: 'arrows-move', run: () => { S.reorder = true; project(); } },
+        { label: tr('Rinomina'), icon: 'pencil', run: async () => {
+          const n = await promptSheet(tr('Rinomina'), P.name, tr('Salva'));
           if (n) { P.name = n; await db.putProject(P); sync.pushProject(P); project(); }
         } },
-        { label: 'Esporta backup (.zip)', icon: 'file-zip', run: () => backupFlow(P) },
-        { label: 'Elimina libro', icon: 'trash', cls: 'danger', run: async () => {
-          const ok = await confirmSheet('Eliminare il libro?', `«${P.name}» e le sue ${P.order.length} pagine verranno eliminati da questo dispositivo. Il backup sul server, se c’è, resta.`, 'Elimina', true);
-          if (ok) { await db.deleteProject(P.id); toast('Libro eliminato'); home(); }
+        { label: tr('Esporta backup (.zip)'), icon: 'file-zip', run: () => backupFlow(P) },
+        { label: tr('Elimina libro'), icon: 'trash', cls: 'danger', run: async () => {
+          const ok = await confirmSheet(tr('Eliminare il libro?'), tr('«{name}» e le sue {n} pagine verranno eliminati da questo dispositivo. Il backup sul server, se c’è, resta.', { name: P.name, n: P.order.length }), tr('Elimina'), true);
+          if (ok) { await db.deleteProject(P.id); toast(tr('Libro eliminato')); home(); }
         } },
       ]);
     } else if (a === 'export') exportSheet();
     else if (a === 'sdelete') {
-      if (!S.selected.size) return toast('Seleziona prima le pagine');
+      if (!S.selected.size) return toast(tr('Seleziona prima le pagine'));
       const n = S.selected.size;
-      if (!(await confirmSheet(`Eliminare ${plural(n, 'pagina', 'pagine')}?`, 'Le pagine verranno eliminate da questo dispositivo.', 'Elimina', true))) return;
+      if (!(await confirmSheet(tr('Eliminare {pages}?', { pages: plural(n, 'pagina', 'pagine') }), tr('Le pagine verranno eliminate da questo dispositivo.'), tr('Elimina'), true))) return;
       S.project = await db.deletePages(P.id, [...S.selected]);
       for (const id of S.selected) S.pages.delete(id);
       sync.pushProject(S.project);
       S.selected.clear();
       S.select = false;
-      toast(`${plural(n, 'pagina eliminata', 'pagine eliminate')}`);
+      toast(plural(n, 'pagina eliminata', 'pagine eliminate'));
       project();
     } else if (a === 'srotate' || a === 'sfilter' || a === 'sdewarp') {
-      if (!S.selected.size) return toast('Seleziona prima le pagine');
+      if (!S.selected.size) return toast(tr('Seleziona prima le pagine'));
       const applyAll = async (fn) => {
         for (const id of S.selected) {
           const p = S.pages.get(id);
@@ -613,11 +620,11 @@ async function project() {
       else if (a === 'sdewarp') {
         const all = [...S.selected].every((id) => S.pages.get(id).params.dewarp);
         applyAll((pr) => { pr.dewarp = !all; pr.erase = []; });
-        toast(all ? 'Pagine non più distese' : 'Distendo le pagine curve in background', null, 2600);
+        toast(all ? tr('Pagine non più distese') : tr('Distendo le pagine curve in background'), null, 2600);
       }
       else {
-        menuSheet('Filtro per le pagine selezionate', FILTER_LIST.map(([k, label]) => ({
-          label, icon: 'adjustments-horizontal', run: async () => {
+        menuSheet(tr('Filtro per le pagine selezionate'), FILTER_LIST.map(([k, label]) => ({
+          label: tr(label), icon: 'adjustments-horizontal', run: async () => {
             await applyAll((pr) => { pr.filter = k; });
             P.filter = k; // diventa il filtro predefinito per le prossime pagine
             await db.putProject(P);
@@ -637,9 +644,9 @@ function updateSelection(el, pages) {
     if (ck) ck.innerHTML = on ? icon('check') : '';
   }
   const t = $('.nav .title', el);
-  if (t) t.textContent = S.selected.size ? plural(S.selected.size, 'selezionata', 'selezionate') : 'Seleziona pagine';
+  if (t) t.textContent = S.selected.size ? plural(S.selected.size, 'selezionata', 'selezionate') : tr('Seleziona pagine');
   const all = $('[data-a="all"]', el);
-  if (all) all.textContent = S.selected.size === pages.length && pages.length ? 'Nessuna' : 'Tutte';
+  if (all) all.textContent = S.selected.size === pages.length && pages.length ? tr('Nessuna') : tr('Tutte');
 }
 
 const FILTER_LIST = [['original', 'Originale'], ['whiten', 'Sbianca'], ['gray', 'Grigi'], ['bw', 'B/N']];
@@ -652,7 +659,7 @@ function pickPhotos(opts = {}) {
     if (!files.length) return;
     const ids = await importFiles(files, opts);
     if (ids.length && S.view === 'project') project();
-    if (ids.length) toast(`${plural(ids.length, 'foto importata', 'foto importate')}`);
+    if (ids.length) toast(plural(ids.length, 'foto importata', 'foto importate'));
   };
   inp.click();
 }
@@ -684,8 +691,8 @@ function enableReorder(el) {
     const over = document.elementFromPoint(e.clientX, e.clientY);
     const target = over && over.closest('.th');
     if (target && target !== drag.th && target.parentNode === grid) {
-      const tr = target.getBoundingClientRect();
-      const after = e.clientX > tr.left + tr.width / 2;
+      const tb = target.getBoundingClientRect();
+      const after = e.clientX > tb.left + tb.width / 2;
       grid.insertBefore(drag.th, after ? target.nextSibling : target);
     }
     // scorrimento automatico vicino ai bordi
@@ -725,21 +732,21 @@ async function camera({ replaceId } = {}) {
     <svg class="overlay" id="ov"><path id="qfill" fill="rgba(93,202,165,0.10)"/><path id="qline" fill="none" stroke-width="3" stroke-linecap="round"/></svg>
     <div class="flash" id="flash"></div>
     <div class="top">
-      <button class="circle glass" data-a="close" aria-label="Chiudi">${icon('x')}</button>
+      <button class="circle glass" data-a="close" aria-label="${tr('Chiudi')}">${icon('x')}</button>
       <span class="pill glass" id="pill">${esc(P.name)} · ${count}</span>
-      <span style="display:flex;gap:8px"><button class="circle glass" data-a="torch" id="torch" hidden aria-label="Torcia">${icon('bolt')}</button>
+      <span style="display:flex;gap:8px"><button class="circle glass" data-a="torch" id="torch" hidden aria-label="${tr('Torcia')}">${icon('bolt')}</button>
       <span class="circle glass" id="cloud" title="">${icon('cloud-check')}</span></span>
     </div>
-    <div class="hint glass" id="hint"><span class="prog"><i id="prog"></i></span><span id="htext">Avvio la fotocamera…</span></div>
+    <div class="hint glass" id="hint"><span class="prog"><i id="prog"></i></span><span id="htext">${tr('Avvio la fotocamera…')}</span></div>
     <div class="bottom">
       <div class="modes">
-        ${replaceId ? '<button class="on">Rifai la pagina</button>' : `<button data-a="auto" class="${P.manual ? '' : 'on'}">Auto</button><button data-a="manual" class="${P.manual ? 'on' : ''}">Manuale</button>
-        <button data-a="double" class="${double ? 'on' : ''}">Doppia pagina</button>`}
+        ${replaceId ? `<button class="on">${tr('Rifai la pagina')}</button>` : `<button data-a="auto" class="${P.manual ? '' : 'on'}">${tr('Auto')}</button><button data-a="manual" class="${P.manual ? 'on' : ''}">${tr('Manuale')}</button>
+        <button data-a="double" class="${double ? 'on' : ''}">${tr('Doppia pagina')}</button>`}
       </div>
       <div class="shutterrow">
-        <button class="last" data-a="close" aria-label="Vai alle pagine"><span id="lastimg"></span>${replaceId ? '' : `<span class="count" id="count" ${count ? '' : 'hidden'}>${count}</span>`}</button>
-        <button class="shutter" data-a="shoot" aria-label="Scatta"><i></i></button>
-        <button class="circle glass" data-a="native" aria-label="Fotocamera di iOS">${icon('camera-plus')}</button>
+        <button class="last" data-a="close" aria-label="${tr('Vai alle pagine')}"><span id="lastimg"></span>${replaceId ? '' : `<span class="count" id="count" ${count ? '' : 'hidden'}>${count}</span>`}</button>
+        <button class="shutter" data-a="shoot" aria-label="${tr('Scatta')}"><i></i></button>
+        <button class="circle glass" data-a="native" aria-label="${tr('Fotocamera di iOS')}">${icon('camera-plus')}</button>
       </div>
     </div>`, 'cam');
 
@@ -779,7 +786,7 @@ async function camera({ replaceId } = {}) {
     if (!quad || !vw) {
       line.setAttribute('d', '');
       fill.setAttribute('d', '');
-      hint.textContent = phase === 'turn' ? 'Gira pagina' : manual ? 'Tocca il pulsante per scattare' : 'Inquadra una pagina';
+      hint.textContent = phase === 'turn' ? tr('Gira pagina') : manual ? tr('Tocca il pulsante per scattare') : tr('Inquadra una pagina');
       return;
     }
     const s = Math.min(W / vw, H / vh);
@@ -806,7 +813,7 @@ async function camera({ replaceId } = {}) {
     const ready = phase === 'steady';
     line.setAttribute('stroke', phase === 'turn' ? 'rgba(255,255,255,0.5)' : ready ? '#5dcaa5' : '#ffffff');
     fill.setAttribute('fill', ready ? 'rgba(93,202,165,0.12)' : 'rgba(255,255,255,0.05)');
-    hint.textContent = phase === 'turn' ? 'Gira pagina' : manual ? 'Pagina rilevata · scatta quando vuoi' : ready ? 'Tieni fermo' : 'Pagina rilevata';
+    hint.textContent = phase === 'turn' ? tr('Gira pagina') : manual ? tr('Pagina rilevata · scatta quando vuoi') : ready ? tr('Tieni fermo') : tr('Pagina rilevata');
   };
 
   const onCapture = async (blob, det) => {
@@ -820,7 +827,7 @@ async function camera({ replaceId } = {}) {
       for (const it of items) { S.pages.set(it.page.id, it.page); queue.enqueue(it.page.id); }
       sync.kick();
       if (replaceId) {
-        toast('Pagina sostituita');
+        toast(tr('Pagina sostituita'));
         return editor(items[0].page.id);
       }
       count = S.project.order.length;
@@ -849,11 +856,11 @@ async function camera({ replaceId } = {}) {
       console.warn(e);
       const m = document.createElement('div');
       m.className = 'msg';
-      m.innerHTML = `${icon('camera', 'big')}<div><b>Fotocamera non disponibile</b><br>
-        ${location.protocol !== 'https:' && location.hostname !== 'localhost' ? 'La fotocamera funziona solo con un indirizzo https.' : 'Controlla di aver concesso il permesso a Safari.'}</div>
-        <button class="btn sm primary" data-a="retry">Riprova</button><button class="btn sm" data-a="native">Usa la fotocamera di iOS</button>`;
+      m.innerHTML = `${icon('camera', 'big')}<div><b>${tr('Fotocamera non disponibile')}</b><br>
+        ${location.protocol !== 'https:' && location.hostname !== 'localhost' ? tr('La fotocamera funziona solo con un indirizzo https.') : tr('Controlla di aver concesso il permesso di usare la fotocamera.')}</div>
+        <button class="btn sm primary" data-a="retry">${tr('Riprova')}</button><button class="btn sm" data-a="native">${tr('Usa la fotocamera di iOS')}</button>`;
       el.append(m);
-      $('#htext', el).textContent = 'Fotocamera non disponibile';
+      $('#htext', el).textContent = tr('Fotocamera non disponibile');
     }
   };
   start();
@@ -896,7 +903,7 @@ async function camera({ replaceId } = {}) {
       P.double = double;
       await db.putProject(Object.assign(await db.getProject(P.id), { double }));
       t.classList.toggle('on', double);
-      toast(double ? 'Doppia pagina: ogni scatto diventa due pagine' : 'Una pagina per scatto', null, 2200);
+      toast(double ? tr('Doppia pagina: ogni scatto diventa due pagine') : tr('Una pagina per scatto'), null, 2200);
     } else if (a === 'native') {
       const inp = $('#pick-camera');
       inp.value = '';
@@ -922,7 +929,7 @@ function maybeRemindBackup() {
   const n = p.pagesSinceBackup || 0;
   if (n < 50 || n - remindedAt < 50) return;
   remindedAt = n;
-  toast(`${n} pagine senza una copia fuori dal telefono`, { label: 'Backup', run: () => backupFlow(p) }, 6000);
+  toast(tr('{n} pagine senza una copia fuori dal telefono', { n }), { label: tr('Backup'), run: () => backupFlow(p) }, 6000);
 }
 
 // =====================================================================
@@ -979,11 +986,11 @@ function openZoom(load) {
   const wrap = document.createElement('div');
   wrap.className = 'zoomview';
   wrap.innerHTML = `<div class="ztop">
-      <button class="circle glass" data-z="close" aria-label="Chiudi">${icon('x')}</button>
-      <div class="seg zseg"><button data-z="page" class="on">Pagina</button><button data-z="orig">Foto originale</button></div>
+      <button class="circle glass" data-z="close" aria-label="${tr('Chiudi')}">${icon('x')}</button>
+      <div class="seg zseg"><button data-z="page" class="on">${tr('Pagina')}</button><button data-z="orig">${tr('Foto originale')}</button></div>
       <span class="zpct"></span></div>
     <div class="zarea"><img alt="" draggable="false"><span class="zbusy">${icon('loader-2', 'spinner')}</span></div>
-    <div class="zhint">Pizzica o doppio tocco per ingrandire, trascina per spostarti</div>`;
+    <div class="zhint">${tr('Pizzica o doppio tocco per ingrandire, trascina per spostarti')}</div>`;
   document.body.append(wrap);
   const area = $('.zarea', wrap);
   const img = $('img', wrap);
@@ -1058,7 +1065,7 @@ function openZoom(load) {
         apply();
       }
     } catch (e) {
-      toast(`Immagine non disponibile: ${e.message}`);
+      toast(tr('Immagine non disponibile: {e}', { e: e.message }));
     } finally {
       if (my === loadTok) busy.hidden = true;
     }
@@ -1190,17 +1197,17 @@ async function editor(pageId) {
 
   const el = show(`
     <div class="nav">
-      <div class="side"><button class="link" data-a="back">${icon('chevron-left')}Pagine</button></div>
+      <div class="side"><button class="link" data-a="back">${icon('chevron-left')}${tr('Pagine')}</button></div>
       <div class="title" style="display:flex;align-items:center;justify-content:center;gap:2px">
-        <button class="iconbtn plain" data-a="prev" aria-label="Pagina precedente" ${idx > 0 ? '' : 'style="visibility:hidden"'}>${icon('chevron-left')}</button>
-        <span>Pagina ${idx + 1} di ${P.order.length}</span>
-        <button class="iconbtn plain" data-a="next" aria-label="Pagina successiva" ${idx < P.order.length - 1 ? '' : 'style="visibility:hidden"'}>${icon('chevron-right')}</button>
+        <button class="iconbtn plain" data-a="prev" aria-label="${tr('Pagina precedente')}" ${idx > 0 ? '' : 'style="visibility:hidden"'}>${icon('chevron-left')}</button>
+        <span>${tr('Pagina {i} di {n}', { i: idx + 1, n: P.order.length })}</span>
+        <button class="iconbtn plain" data-a="next" aria-label="${tr('Pagina successiva')}" ${idx < P.order.length - 1 ? '' : 'style="visibility:hidden"'}>${icon('chevron-right')}</button>
       </div>
-      <div class="side r"><button class="link" data-a="done">Fatto</button></div>
+      <div class="side r"><button class="link" data-a="done">${tr('Fatto')}</button></div>
     </div>
     <div class="stage" id="stage"><img id="pv" alt=""><svg id="ov"></svg><canvas id="cv"></canvas><canvas id="loupe" class="loupe" hidden></canvas><span class="busy" id="busy" hidden>${icon('loader-2', 'spinner')}</span>
-      <div class="histbtns"><button class="circle glass" data-a="undo" aria-label="Annulla">${icon('arrow-back-up')}</button><button class="circle glass" data-a="redoh" aria-label="Ripeti">${icon('arrow-forward-up')}</button></div>
-      <button class="circle glass zoombtn" data-a="zoom" aria-label="Schermo intero con zoom">${icon('arrows-maximize')}</button></div>
+      <div class="histbtns"><button class="circle glass" data-a="undo" aria-label="${tr('Annulla modifica')}">${icon('arrow-back-up')}</button><button class="circle glass" data-a="redoh" aria-label="${tr('Ripeti')}">${icon('arrow-forward-up')}</button></div>
+      <button class="circle glass zoombtn" data-a="zoom" aria-label="${tr('Schermo intero con zoom')}">${icon('arrows-maximize')}</button></div>
     <div id="controls"></div>`);
   const stage = $('#stage', el);
   const pv = $('#pv', el);
@@ -1322,7 +1329,7 @@ async function editor(pageId) {
         Object.assign(params, structuredClone(e.params));
         dirty = true;
         await commit();
-        toast('Divisione annullata');
+        toast(tr('Divisione annullata'));
         editor(page.id);
       } else {
         Object.assign(params, structuredClone(e.params));
@@ -1350,18 +1357,18 @@ async function editor(pageId) {
       <span class="v">${lo < 0 && params[k] > 0 ? '+' : ''}${params[k]}</span></label>`;
     controls.innerHTML = `
       <div class="panel">
-        <div class="allbadge" id="allbadge" ${P.applyAll ? '' : 'hidden'}>${icon('copy')} Le modifiche valgono per tutte le pagine</div>
-        <div class="seg" role="tablist">${FILTER_LIST.map(([k, l]) => `<button data-f="${k}" class="${params.filter === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-        <div class="sliders">${sl('brightness', 'Luminosità')}${sl('contrast', 'Contrasto')}${sl('sharpness', 'Nitidezza', 0, 100)}</div>
+        <div class="allbadge" id="allbadge" ${P.applyAll ? '' : 'hidden'}>${icon('copy')} ${tr('Le modifiche valgono per tutte le pagine')}</div>
+        <div class="seg" role="tablist">${FILTER_LIST.map(([k, l]) => `<button data-f="${k}" class="${params.filter === k ? 'on' : ''}">${tr(l)}</button>`).join('')}</div>
+        <div class="sliders">${sl('brightness', tr('Luminosità'))}${sl('contrast', tr('Contrasto'))}${sl('sharpness', tr('Nitidezza'), 0, 100)}</div>
       </div>
       <div class="toolbar" style="margin-top:10px">
-        <button class="tool" data-a="crop">${icon('crop')}Ritaglia</button>
-        <button class="tool" data-a="split">${icon('columns-2')}Dividi</button>
-        <button class="tool" data-a="rotate">${icon('rotate-clockwise')}Ruota</button>
-        <button class="tool ${params.dewarp ? 'on' : ''}" data-a="dewarp">${icon('wave-sine')}Distendi</button>
-        <button class="tool" data-a="erase">${icon('eraser')}Gomma</button>
-        <button class="tool" data-a="redo">${icon('camera-rotate')}Rifai</button>
-        <button class="tool" data-a="more">${icon('dots')}Altro</button>
+        <button class="tool" data-a="crop">${icon('crop')}${tr('Ritaglia')}</button>
+        <button class="tool" data-a="split">${icon('columns-2')}${tr('Dividi')}</button>
+        <button class="tool" data-a="rotate">${icon('rotate-clockwise')}${tr('Ruota')}</button>
+        <button class="tool ${params.dewarp ? 'on' : ''}" data-a="dewarp">${icon('wave-sine')}${tr('Distendi')}</button>
+        <button class="tool" data-a="erase">${icon('eraser')}${tr('Gomma')}</button>
+        <button class="tool" data-a="redo">${icon('camera-rotate')}${tr('Rifai')}</button>
+        <button class="tool" data-a="more">${icon('dots')}${tr('Altro')}</button>
       </div>`;
     $$('[data-f]', controls).forEach((b) => (b.onclick = () => {
       mark();
@@ -1395,10 +1402,10 @@ async function editor(pageId) {
     ow = pv.naturalWidth;
     oh = pv.naturalHeight;
     controls.innerHTML = `
-      <div class="modehint">Trascina gli angoli, o il centro di un lato per spostarlo tutto</div>
-      <div class="row2"><button class="btn sm" style="flex:1" data-c="detect">${icon('wand')} Rileva</button>
-      <button class="btn sm" style="flex:1" data-c="full">Tutta la foto</button></div>
-      <div class="bar"><button class="btn" data-c="cancel">Annulla</button><button class="btn primary" data-c="apply">Applica</button></div>`;
+      <div class="modehint">${tr('Trascina gli angoli, o il centro di un lato per spostarlo tutto')}</div>
+      <div class="row2"><button class="btn sm" style="flex:1" data-c="detect">${icon('wand')} ${tr('Rileva')}</button>
+      <button class="btn sm" style="flex:1" data-c="full">${tr('Tutta la foto')}</button></div>
+      <div class="bar"><button class="btn" data-c="cancel">${tr('Annulla')}</button><button class="btn primary" data-c="apply">${tr('Applica')}</button></div>`;
     drawCrop();
     controls.onclick = async (e) => {
       const c = e.target.closest('[data-c]');
@@ -1407,7 +1414,7 @@ async function editor(pageId) {
       if (k === 'detect') {
         await origP;
         const r = await detectPage(orig);
-        if (r.found) { quad = r.found.quad; drawCrop(); } else toast('Bordi non trovati: sistemali a mano');
+        if (r.found) { quad = r.found.quad; drawCrop(); } else toast(tr('Bordi non trovati: sistemali a mano'));
       } else if (k === 'full') { quad = structuredClone(FULL_QUAD); drawCrop(); }
       else if (k === 'cancel') toView(!pvURL);
       else if (k === 'apply') {
@@ -1573,10 +1580,10 @@ async function editor(pageId) {
     eraseBase = params.erase.length;
     paper = paperColor();
     controls.innerHTML = `
-      <div class="modehint">Passa il dito su macchie, segni e dita sul bordo</div>
-      <div class="panel"><div class="sliders"><label class="slider"><span>Pennello</span>
+      <div class="modehint">${tr('Passa il dito su macchie, segni e dita sul bordo')}</div>
+      <div class="panel"><div class="sliders"><label class="slider"><span>${tr('Pennello')}</span>
         <input type="range" min="1" max="10" step="0.5" value="${brush}" id="brush" style="--p:${((brush - 1) / 9) * 100}%"><span class="v"></span></label></div></div>
-      <div class="bar"><button class="btn" data-c="undo">${icon('arrow-back-up')} Annulla tratto</button><button class="btn primary" data-c="ok">Fine</button></div>`;
+      <div class="bar"><button class="btn" data-c="undo">${icon('arrow-back-up')} ${tr('Annulla tratto')}</button><button class="btn primary" data-c="ok">${tr('Fine')}</button></div>`;
     fitCanvas();
     const b = $('#brush', controls);
     b.oninput = () => { brush = +b.value; b.style.setProperty('--p', `${((brush - 1) / 9) * 100}%`); };
@@ -1651,7 +1658,7 @@ async function editor(pageId) {
   function eraseStart(e) {
     if (!eraseCtx) return;
     // finché l'anteprima non è aggiornata (es. dopo un ritaglio) i tratti finirebbero nel punto sbagliato
-    if (shownGeom !== geomKey(params)) { toast('Attendi l’anteprima aggiornata', null, 1500); return; }
+    if (shownGeom !== geomKey(params)) { toast(tr('Attendi l’anteprima aggiornata'), null, 1500); return; }
     stage.setPointerCapture(e.pointerId);
     const p0 = erasePt(e);
     stroke = { r: brush / 100, pts: [p0] };
@@ -1818,36 +1825,36 @@ async function editor(pageId) {
       // i tratti della gomma erano sulla pagina non distesa
       params.erase = [];
       if (params.dewarp && !(await db.kvGet('uvLoaded', false))) {
-        toast('Scarico il modello per le pagine curve (31 MB), solo la prima volta', null, 5000);
+        toast(tr('Scarico il modello per le pagine curve (31 MB), solo la prima volta'), null, 5000);
         db.kvSet('uvLoaded', true);
       }
       change();
     } else if (a === 'split') panelSplit();
     else if (a === 'redo') { await commit(); camera({ replaceId: page.id }); }
     else if (a === 'more') {
-      menuSheet(`Pagina ${idx + 1}`, [
-        { label: `Modifiche a tutte le pagine: ${P.applyAll ? 'attivo' : 'disattivo'}`, icon: 'copy', run: async () => {
+      menuSheet(tr('Pagina {i}', { i: idx + 1 }), [
+        { label: P.applyAll ? tr('Modifiche a tutte le pagine: attivo') : tr('Modifiche a tutte le pagine: disattivo'), icon: 'copy', run: async () => {
           P.applyAll = !P.applyAll;
           await db.putProject(Object.assign((await db.getProject(P.id)) || P, { applyAll: P.applyAll }));
           if (P.applyAll) {
-            toast('Filtro, luminosità, contrasto e Distendi ora valgono per tutte le pagine');
+            toast(tr('Filtro, luminosità, contrasto, nitidezza e Distendi ora valgono per tutte le pagine'));
             dirty = true;
             await applyLookToAll();
-          } else toast('Le modifiche valgono solo per questa pagina');
+          } else toast(tr('Le modifiche valgono solo per questa pagina'));
           allBadge();
         } },
-        { label: 'Nuova pagina dopo questa', icon: 'square-plus', run: async () => { await commit(); pickPhotos({ index: idx + 1 }); } },
-        { label: 'Ripristina la foto originale', icon: 'arrow-back-up', run: () => {
+        { label: tr('Nuova pagina dopo questa'), icon: 'square-plus', run: async () => { await commit(); pickPhotos({ index: idx + 1 }); } },
+        { label: tr('Ripristina la foto originale'), icon: 'arrow-back-up', run: () => {
           mark();
           Object.assign(params, { quad: FULL_QUAD, rotation: 0, filter: 'original', brightness: 0, contrast: 0, sharpness: 50, erase: [], dewarp: false });
           dirty = true;
           toView(true);
         } },
-        ...(isBlurry(page, blurMedian()) ? [{ label: 'Non è sfocata, togli l’avviso', icon: 'check', run: async () => {
-          page.blurOk = true; await db.putPage(page); S.pages.set(page.id, page); toast('Avviso rimosso');
+        ...(isBlurry(page, blurMedian()) ? [{ label: tr('Non è sfocata, togli l’avviso'), icon: 'check', run: async () => {
+          page.blurOk = true; await db.putPage(page); S.pages.set(page.id, page); toast(tr('Avviso rimosso'));
         } }] : []),
-        { label: 'Elimina pagina', icon: 'trash', cls: 'danger', run: async () => {
-          if (!(await confirmSheet('Eliminare la pagina?', `La pagina ${idx + 1} verrà eliminata.`, 'Elimina', true))) return;
+        { label: tr('Elimina pagina'), icon: 'trash', cls: 'danger', run: async () => {
+          if (!(await confirmSheet(tr('Eliminare la pagina?'), tr('La pagina {i} verrà eliminata.', { i: idx + 1 }), tr('Elimina'), true))) return;
           S.project = await db.deletePages(P.id, [page.id]);
           S.pages.delete(page.id);
           sync.pushProject(S.project);
@@ -1863,13 +1870,13 @@ async function editor(pageId) {
   let line = [0.5, 0.5];
   let dragL = null;
   async function panelSplit() {
-    if (!pvURL) { toast('Attendi l’anteprima della pagina'); return; }
+    if (!pvURL) { toast(tr('Attendi l’anteprima della pagina')); return; }
     mode = 'split';
     ov.innerHTML = '';
     line = [0.5, 0.5];
     controls.innerHTML = `
-      <div class="modehint">Sposta la linea sulla piega tra le due pagine. Trascina i cerchi per inclinarla</div>
-      <div class="bar"><button class="btn" data-c="cancel">Annulla</button><button class="btn primary" data-c="apply">Dividi</button></div>`;
+      <div class="modehint">${tr('Sposta la linea sulla piega tra le due pagine. Trascina i cerchi per inclinarla')}</div>
+      <div class="bar"><button class="btn" data-c="cancel">${tr('Annulla')}</button><button class="btn primary" data-c="apply">${tr('Dividi')}</button></div>`;
     drawSplit();
     controls.onclick = async (e) => {
       const c = e.target.closest('[data-c]');
@@ -1946,7 +1953,7 @@ async function editor(pageId) {
     sync.kick();
     H0.undo.push({ t: 'split', twinId: twin.id, line: [xt, xb], params: before });
     if (!keepRedo) H0.redo.length = 0;
-    toast('Pagina divisa in due');
+    toast(tr('Pagina divisa in due'));
     editor(page.id);
   }
 }
@@ -1959,38 +1966,38 @@ async function exportSheet() {
   const E = await import('./export.js');
   const o = { kind: 'pdf', ocr: true, engine: 'paddle', ita: true, eng: true, quality: 'medium', size: 'image', ...(await db.kvGet('exportOpts', {})) };
   const st = sync.getState();
-  const s = sheet(`${shead('Esporta')}
-    <div class="seg" id="kind"><button data-k="pdf">PDF</button><button data-k="img">Immagini</button></div>
+  const s = sheet(`${shead(tr('Esporta'))}
+    <div class="seg" id="kind"><button data-k="pdf">PDF</button><button data-k="img">${tr('Immagini')}</button></div>
     <div id="opts"></div>
-    <div class="gl">Backup</div>
+    <div class="gl">${tr('Backup')}</div>
     <div class="card">
-      <div class="li"><span>Ultimo backup</span><span class="r">${ago(P.lastBackup)}</span></div>
-      <button class="li accent" data-a="backup"><span>Esporta progetto (.zip)</span>${icon('download')}</button>
-      <button class="li" data-a="server"><span>Backup automatico</span><span class="r">${st.status === 'off' ? 'non attivo' : st.status === 'error' ? 'errore' : st.status === 'syncing' ? 'in corso' : 'attivo'}${icon('chevron-right')}</span></button>
+      <div class="li"><span>${tr('Ultimo backup')}</span><span class="r">${ago(P.lastBackup)}</span></div>
+      <button class="li accent" data-a="backup"><span>${tr('Esporta progetto (.zip)')}</span>${icon('download')}</button>
+      <button class="li" data-a="server"><span>${tr('Backup automatico')}</span><span class="r">${st.status === 'off' ? tr('non attivo') : st.status === 'error' ? tr('errore') : st.status === 'syncing' ? tr('in corso') : tr('attivo')}${icon('chevron-right')}</span></button>
     </div>
     <div class="actions"><button class="btn primary" id="go"></button></div>`);
 
   const draw = async () => {
     $$('#kind button', s.el).forEach((b) => b.classList.toggle('on', b.dataset.k === o.kind));
-    const qseg = `<div class="seg" id="q">${Object.entries(E.QUALITY).map(([k, v]) => `<button data-q="${k}" class="${o.quality === k ? 'on' : ''}">${v.label}</button>`).join('')}</div>`;
+    const qseg = `<div class="seg" id="q">${Object.entries(E.QUALITY).map(([k, v]) => `<button data-q="${k}" class="${o.quality === k ? 'on' : ''}">${tr(v.label)}</button>`).join('')}</div>`;
     const sw = (id, on) => `<span class="switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><i></i></span>`;
     $('#opts', s.el).innerHTML =
       (o.kind === 'pdf'
-        ? `<div class="gl">Formato pagina</div>
-          <div class="seg" id="psize"><button data-s="image" class="${o.size === 'image' ? 'on' : ''}">Come la foto</button><button data-s="a4" class="${o.size === 'a4' ? 'on' : ''}">A4 con margini</button></div>
-          ${o.size === 'a4' ? '<p class="note">Ogni pagina viene centrata su un foglio A4 con 1 cm di margine: tutte della stessa misura, pronte da stampare.</p>' : ''}
+        ? `<div class="gl">${tr('Formato pagina')}</div>
+          <div class="seg" id="psize"><button data-s="image" class="${o.size === 'image' ? 'on' : ''}">${tr('Come la foto')}</button><button data-s="a4" class="${o.size === 'a4' ? 'on' : ''}">${tr('A4 con margini')}</button></div>
+          ${o.size === 'a4' ? `<p class="note">${tr('Ogni pagina viene centrata su un foglio A4 con 1 cm di margine: tutte della stessa misura, pronte da stampare.')}</p>` : ''}
           <div class="gl">PDF</div><div class="card">
-            <label class="li"><span>Testo ricercabile (OCR)</span>${sw('ocr', o.ocr)}</label>
-            ${o.ocr && o.engine === 'tesseract' ? `<label class="li"><span>Italiano</span>${sw('ita', o.ita)}</label><label class="li"><span>Inglese</span>${sw('eng', o.eng)}</label>` : ''}
+            <label class="li"><span>${tr('Testo ricercabile (OCR)')}</span>${sw('ocr', o.ocr)}</label>
+            ${o.ocr && o.engine === 'tesseract' ? `<label class="li"><span>${tr('Italiano')}</span>${sw('ita', o.ita)}</label><label class="li"><span>${tr('Inglese')}</span>${sw('eng', o.eng)}</label>` : ''}
           </div>
-          ${o.ocr ? `<div class="gl">Riconoscimento del testo</div>
-            <div class="seg" id="engine">${Object.entries(OCR_ENGINES).map(([k, v]) => `<button data-e="${k}" class="${o.engine === k ? 'on' : ''}">${v.label} · ${v.name}</button>`).join('')}</div>
+          ${o.ocr ? `<div class="gl">${tr('Riconoscimento del testo')}</div>
+            <div class="seg" id="engine">${Object.entries(OCR_ENGINES).map(([k, v]) => `<button data-e="${k}" class="${o.engine === k ? 'on' : ''}">${tr(v.label)} · ${v.name}</button>`).join('')}</div>
             <p class="note">${o.engine === 'paddle'
-              ? 'Più preciso su foto, pagine curve e caratteri piccoli. Riconosce italiano, inglese e le altre lingue con alfabeto latino. La prima volta scarica circa 27 MB.'
-              : 'Circa tre volte più veloce, meno preciso sulle foto difficili. La prima volta scarica circa 10 MB.'} Tutto avviene sul telefono, poi funziona anche offline.</p>` : ''}`
+              ? tr('Più preciso su foto, pagine curve e caratteri piccoli. Riconosce italiano, inglese e le altre lingue con alfabeto latino. La prima volta scarica circa 27 MB.')
+              : tr('Circa tre volte più veloce, meno preciso sulle foto difficili. La prima volta scarica circa 10 MB.')}${sp()}${tr('Tutto avviene sul telefono, poi funziona anche offline.')}</p>` : ''}`
         : '') +
-      `<div class="gl">Qualità</div>${qseg}<p class="note" id="est">Stima in corso…</p>`;
-    $('#go', s.el).textContent = o.kind === 'pdf' ? 'Crea PDF' : 'Crea immagini (.zip)';
+      `<div class="gl">${tr('Qualità')}</div>${qseg}<p class="note" id="est">${tr('Stima in corso…')}</p>`;
+    $('#go', s.el).textContent = o.kind === 'pdf' ? tr('Crea PDF') : tr('Crea immagini (.zip)');
     for (const id of ['ocr', 'ita', 'eng']) {
       const i = $(`#${id}`, s.el);
       if (i) i.onchange = () => { o[id] = i.checked; save(); draw(); };
@@ -2000,7 +2007,7 @@ async function exportSheet() {
     $$('#psize button', s.el).forEach((b) => (b.onclick = () => { o.size = b.dataset.s; save(); draw(); }));
     const est = await E.estimate(P, o.quality);
     const el = $('#est', s.el);
-    if (el) el.textContent = `${plural(P.order.length, 'pagina', 'pagine')} · circa ${bytes(est)}`;
+    if (el) el.textContent = `${plural(P.order.length, 'pagina', 'pagine')} · ${tr('circa {size}', { size: bytes(est) })}`;
   };
   const save = () => db.kvSet('exportOpts', o);
   $$('#kind button', s.el).forEach((b) => (b.onclick = () => { o.kind = b.dataset.k; save(); draw(); }));
@@ -2015,13 +2022,13 @@ async function exportSheet() {
 
   $('#go', s.el).onclick = async () => {
     const langs = [o.ita && 'ita', o.eng && 'eng'].filter(Boolean);
-    if (o.kind === 'pdf' && o.ocr && o.engine === 'tesseract' && !langs.length) return toast('Scegli almeno una lingua');
+    if (o.kind === 'pdf' && o.ocr && o.engine === 'tesseract' && !langs.length) return toast(tr('Scegli almeno una lingua'));
     s.close();
     const ctrl = new AbortController();
-    const prog = sheet(`${shead(o.kind === 'pdf' ? 'Creo il PDF' : 'Preparo le immagini')}
-      <div class="progress"><i id="bar"></i></div><div class="ptext" id="ptext">Preparazione…</div>
-      <p class="note" style="text-align:center">Tieni l’app aperta. Le pagine restano salvate anche se interrompi.</p>
-      <div class="actions"><button class="btn" data-close>Annulla</button></div>`, { dismissable: false, onClose: () => ctrl.abort() });
+    const prog = sheet(`${shead(o.kind === 'pdf' ? tr('Creo il PDF') : tr('Preparo le immagini'))}
+      <div class="progress"><i id="bar"></i></div><div class="ptext" id="ptext">${tr('Preparazione…')}</div>
+      <p class="note" style="text-align:center">${tr('Tieni l’app aperta. Le pagine restano salvate anche se interrompi.')}</p>
+      <div class="actions"><button class="btn" data-close>${tr('Annulla')}</button></div>`, { dismissable: false, onClose: () => ctrl.abort() });
     const upd = (frac, text) => {
       const b = $('#bar', prog.el);
       if (b) b.style.width = `${Math.round(frac * 100)}%`;
@@ -2029,7 +2036,7 @@ async function exportSheet() {
       if (t) t.textContent = text;
     };
     try {
-      await waitProcessing((left) => upd(0, `Finisco di elaborare le pagine (${left})…`), ctrl.signal);
+      await waitProcessing((left) => upd(0, tr('Finisco di elaborare le pagine ({n})…', { n: left })), ctrl.signal);
       const fresh = await db.getProject(P.id);
       let blob;
       let name;
@@ -2037,23 +2044,23 @@ async function exportSheet() {
         blob = await E.buildPdf(fresh, {
           quality: o.quality, ocr: o.ocr, engine: o.engine, langs, size: o.size, signal: ctrl.signal,
           onProgress: ({ phase, done, total, detail }) => {
-            if (phase === 'ocr') upd((done / total) * 0.85, detail || `Riconosco il testo: pagina ${Math.min(total, Math.floor(done) + 1)} di ${total}`);
-            else upd(o.ocr ? 0.85 + (done / total) * 0.15 : done / total, `Impagino: ${done} di ${total}`);
+            if (phase === 'ocr') upd((done / total) * 0.85, detail ? tr(detail) : tr('Riconosco il testo: pagina {i} di {n}', { i: Math.min(total, Math.floor(done) + 1), n: total }));
+            else upd(o.ocr ? 0.85 + (done / total) * 0.15 : done / total, tr('Impagino: {i} di {n}', { i: done, n: total }));
           },
         });
         name = `${E.slug(fresh.name)}.pdf`;
       } else {
-        blob = await E.buildImagesZip(fresh, { quality: o.quality, onProgress: ({ done, total }) => upd(done / total, `Pagina ${done + 1} di ${total}`) });
-        name = `${E.slug(fresh.name)}-immagini.zip`;
+        blob = await E.buildImagesZip(fresh, { quality: o.quality, onProgress: ({ done, total }) => upd(done / total, tr('Pagina {i} di {n}', { i: done + 1, n: total })) });
+        name = `${E.slug(fresh.name)}-${E.slug(tr('immagini'))}.zip`;
       }
       if (ctrl.signal.aborted) return;
       prog.close();
-      fileReadySheet(blob, name, o.kind === 'pdf' ? 'PDF pronto' : 'Immagini pronte');
+      fileReadySheet(blob, name, o.kind === 'pdf' ? tr('PDF pronto') : tr('Immagini pronte'));
     } catch (err) {
       prog.close();
       if (err.name !== 'AbortError') {
         console.error(err);
-        toast(`Esportazione non riuscita: ${err.message}`);
+        toast(tr('Esportazione non riuscita: {e}', { e: err.message }));
       }
     }
   };
@@ -2085,39 +2092,52 @@ async function settings() {
   try { est = await navigator.storage.estimate(); } catch { /* */ }
   try { persisted = await navigator.storage.persisted(); } catch { /* */ }
   const st = sync.getState();
-  const s = sheet(`${shead('Impostazioni')}
-    <div class="gl" style="margin-top:4px">Aspetto</div>
-    <div class="seg" id="theme">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([k, l]) => `<button data-t="${k}" class="${theme === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+  const lang = langPref();
+  const s = sheet(`${shead(tr('Impostazioni'))}
+    <div class="gl" style="margin-top:4px">${tr('Aspetto')}</div>
+    <div class="seg" id="theme">${[['auto', tr('Automatico')], ['light', tr('Chiaro')], ['dark', tr('Scuro')]].map(([k, l]) => `<button data-t="${k}" class="${theme === k ? 'on' : ''}">${l}</button>`).join('')}</div>
 
-    <div class="gl">Backup automatico sul server</div>
-    <div class="card">
-      <label class="li"><span>Attivo</span><span class="switch"><input type="checkbox" id="sen" ${cfg.enabled ? 'checked' : ''}><i></i></span></label>
-      <label class="li"><span>Indirizzo</span><input type="url" id="surl" placeholder="https://pageturn.casa.it" value="${esc(cfg.url)}" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
-      <label class="li"><span>Codice</span><input type="password" id="stok" placeholder="facoltativo" value="${esc(cfg.token)}"></label>
-      <div class="li"><span>Stato</span><span class="r" id="sst">${syncText(st)}</span></div>
-      <button class="li accent" data-a="test"><span>Verifica connessione</span>${icon('server')}</button>
-      <button class="li accent" data-a="restore"><span>Ripristina dal server</span>${icon('download')}</button>
-    </div>
-    <p class="note">Ogni foto viene inviata al tuo server appena scattata, così resta una copia anche se perdi il telefono. Il server è incluso nel progetto (cartella server).</p>
+    <div class="gl">${tr('Lingua')}</div>
+    <div class="seg" id="lang">${[['auto', tr('Automatica')], ...LANGS].map(([k, l]) => `<button data-l="${k}" class="${lang === k ? 'on' : ''}" ${k === 'auto' ? '' : `lang="${k}"`}>${l}</button>`).join('')}</div>
 
-    <div class="gl">Archivio sul dispositivo</div>
+    <div class="gl">${tr('Backup automatico sul server')}</div>
     <div class="card">
-      <div class="li"><span>Spazio usato</span><span class="r">${est ? `${bytes(est.usage)}${est.quota ? ` di ${bytes(est.quota)}` : ''}` : 'non disponibile'}</span></div>
-      <div class="li"><span>Protetto dalla pulizia</span><span class="r">${persisted ? 'sì' : standalone ? 'non confermato' : 'no, installa l’app'}</span></div>
-      <button class="li accent" data-a="import"><span>Importa un backup (.zip)</span>${icon('upload')}</button>
+      <label class="li"><span>${tr('Attivo')}</span><span class="switch"><input type="checkbox" id="sen" ${cfg.enabled ? 'checked' : ''}><i></i></span></label>
+      <label class="li"><span>${tr('Indirizzo')}</span><input type="url" id="surl" placeholder="https://pageturn.example.com" value="${esc(cfg.url)}" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+      <label class="li"><span>${tr('Codice')}</span><input type="password" id="stok" placeholder="${tr('facoltativo')}" value="${esc(cfg.token)}"></label>
+      <div class="li"><span>${tr('Stato')}</span><span class="r" id="sst">${syncText(st)}</span></div>
+      <button class="li accent" data-a="test"><span>${tr('Verifica connessione')}</span>${icon('server')}</button>
+      <button class="li accent" data-a="restore"><span>${tr('Ripristina dal server')}</span>${icon('download')}</button>
+    </div>
+    <p class="note">${tr('Ogni foto viene inviata al tuo server appena scattata, così resta una copia anche se perdi il telefono. Il server è incluso nel progetto (cartella server).')}</p>
+
+    <div class="gl">${tr('Archivio sul dispositivo')}</div>
+    <div class="card">
+      <div class="li"><span>${tr('Spazio usato')}</span><span class="r">${est ? (est.quota ? tr('{used} di {quota}', { used: bytes(est.usage), quota: bytes(est.quota) }) : bytes(est.usage)) : tr('non disponibile')}</span></div>
+      <div class="li"><span>${tr('Protetto dalla pulizia')}</span><span class="r">${persisted ? tr('sì') : standalone ? tr('non confermato') : tr('no, installa l’app')}</span></div>
+      <button class="li accent" data-a="import"><span>${tr('Importa un backup (.zip)')}</span>${icon('upload')}</button>
     </div>
 
-    <div class="gl">Informazioni</div>
+    <div class="gl">${tr('Informazioni')}</div>
     <div class="card">
-      <div class="li"><span>Versione</span><span class="r">${VERSION}</span></div>
-      <div class="li"><span>Ambiente</span><span class="r" style="max-width:62%">${esc(envInfo())}</span></div>
-      <a class="li accent" href="${REPO}" target="_blank" rel="noopener" style="text-decoration:none"><span>Codice sorgente su GitHub</span>${icon('chevron-right')}</a>
+      <div class="li"><span>${tr('Versione')}</span><span class="r">${VERSION}</span></div>
+      <div class="li"><span>${tr('Ambiente')}</span><span class="r" style="max-width:62%">${esc(envInfo())}</span></div>
+      <a class="li accent" href="${REPO}" target="_blank" rel="noopener" style="text-decoration:none"><span>${tr('Codice sorgente su GitHub')}</span>${icon('chevron-right')}</a>
     </div>
-    <p class="note">Pageturn è open source (licenza GPL-3.0). Le scansioni restano sul tuo dispositivo e sul tuo server: nessun dato passa da altri servizi.</p>`);
+    <p class="note">${tr('Pageturn è open source (licenza GPL-3.0). Le scansioni restano sul tuo dispositivo e sul tuo server: nessun dato passa da altri servizi.')}</p>`);
 
   $$('#theme button', s.el).forEach((b) => (b.onclick = () => {
     applyTheme(b.dataset.t);
     $$('#theme button', s.el).forEach((x) => x.classList.toggle('on', x === b));
+  }));
+  // Cambiando lingua si ridisegna la schermata sotto e si riapre il foglio, già tradotto.
+  $$('#lang button', s.el).forEach((b) => (b.onclick = async () => {
+    if (b.dataset.l === langPref()) return;
+    await applyLang(b.dataset.l);
+    s.close();
+    if (S.view === 'home') home();
+    else if (S.view === 'project') await project();
+    settings();
   }));
   const save = async () => {
     await sync.configure({ enabled: $('#sen', s.el).checked, url: $('#surl', s.el).value.trim(), token: $('#stok', s.el).value });
@@ -2138,10 +2158,10 @@ async function settings() {
       await save();
       try {
         await sync.health();
-        toast('Server raggiungibile');
+        toast(tr('Server raggiungibile'));
         sync.kick();
       } catch (err) {
-        toast(`Server non raggiungibile: ${err.message}`);
+        toast(tr('Server non raggiungibile: {err}', { err: err.message }));
       }
     } else if (t.dataset.a === 'restore') {
       await save();
@@ -2152,18 +2172,18 @@ async function settings() {
       inp.onchange = async () => {
         const f = inp.files[0];
         if (!f) return;
-        const tp = toastProgress('Importo il backup…');
+        const tp = toastProgress(tr('Importo il backup…'));
         try {
           const { importBackup } = await import('./export.js');
           const p = await importBackup(f);
           tp.done();
           close0();
           queue.resume();
-          toast(`«${p.name}» importato`);
+          toast(tr('«{name}» importato', { name: p.name }));
           if (S.view === 'home') home();
         } catch (err) {
           tp.done();
-          toast(err.message);
+          toast(tr(err.message));
         }
       };
       inp.click();
@@ -2178,17 +2198,17 @@ function envInfo() {
   const ua = navigator.userAgent;
   const browser = /OPT\/|OPR\/|Opera/.test(ua) ? 'Opera' : /CriOS|Chrome\//.test(ua) ? 'Chrome' : /FxiOS|Firefox/.test(ua) ? 'Firefox' : /EdgiOS|Edg\//.test(ua) ? 'Edge' : /Safari/.test(ua) ? 'Safari' : 'browser';
   const engine = navigator.userAgentData ? 'Chromium' : /AppleWebKit/.test(ua) ? 'WebKit' : /Gecko\//.test(ua) ? 'Gecko' : '?';
-  const parts = [standalone ? 'app installata' : `${browser}`, engine];
-  parts.push(navigator.serviceWorker && navigator.serviceWorker.controller ? 'offline sì' : 'offline no');
-  parts.push(self.crossOriginIsolated ? 'OCR multithread' : 'OCR a 1 thread');
+  const parts = [standalone ? tr('app installata') : `${browser}`, engine];
+  parts.push(navigator.serviceWorker && navigator.serviceWorker.controller ? tr('offline sì') : tr('offline no'));
+  parts.push(self.crossOriginIsolated ? tr('OCR multithread') : tr('OCR a 1 thread'));
   return parts.join(' · ');
 }
 
 function syncText(st) {
-  if (st.status === 'off') return 'non attivo';
-  if (st.status === 'syncing') return `invio in corso (${st.pending})`;
-  if (st.status === 'error') return st.error || 'errore';
-  return 'tutto sul server';
+  if (st.status === 'off') return tr('non attivo');
+  if (st.status === 'syncing') return tr('invio in corso ({n})', { n: st.pending });
+  if (st.status === 'error') return st.error || tr('errore');
+  return tr('tutto sul server');
 }
 
 async function restoreSheet() {
@@ -2196,24 +2216,24 @@ async function restoreSheet() {
   try {
     list = await sync.remoteProjects();
   } catch (e) {
-    return toast(`Server non raggiungibile: ${e.message}`);
+    return toast(tr('Server non raggiungibile: {err}', { err: e.message }));
   }
-  if (!list.length) return toast('Sul server non ci sono libri');
-  menuSheet('Ripristina dal server', list.map((p) => ({
+  if (!list.length) return toast(tr('Sul server non ci sono libri'));
+  menuSheet(tr('Ripristina dal server'), list.map((p) => ({
     label: `${p.name} · ${plural(p.pages, 'pagina', 'pagine')}`,
     icon: 'download',
     run: async () => {
-      const t = toastProgress('Scarico…');
+      const t = toastProgress(tr('Scarico…'));
       try {
-        const proj = await sync.restore(p.id, (i, n) => t.set(`Scarico ${i + 1} di ${n}…`));
+        const proj = await sync.restore(p.id, (i, n) => t.set(tr('Scarico {i} di {n}…', { i: i + 1, n })));
         t.done();
         queue.resume();
-        toast(`«${proj.name}» ripristinato`);
+        toast(tr('«{name}» ripristinato', { name: proj.name }));
         await loadProject(proj.id);
         project();
       } catch (e) {
         t.done();
-        toast(`Ripristino non riuscito: ${e.message}`);
+        toast(tr('Ripristino non riuscito: {err}', { err: e.message }));
       }
     },
   })));
@@ -2231,6 +2251,9 @@ queue.events.addEventListener('page', (e) => {
 async function boot() {
   const theme = await db.kvGet('theme', 'auto');
   applyTheme(theme);
+  // la lingua è già stata letta da localStorage; l'archivio vince se localStorage è stato svuotato
+  const lang = await db.kvGet('lang', null);
+  if (lang && lang !== langPref()) await applyLang(lang);
   try {
     if (navigator.storage && navigator.storage.persist) await navigator.storage.persist();
   } catch { /* */ }
@@ -2246,7 +2269,7 @@ async function boot() {
         const w = reg.installing;
         w && w.addEventListener('statechange', () => {
           if (w.state === 'installed' && navigator.serviceWorker.controller) {
-            toast('È pronta una nuova versione', { label: 'Aggiorna', run: () => w.postMessage('skip') }, 8000);
+            toast(tr('È pronta una nuova versione'), { label: tr('Aggiorna'), run: () => w.postMessage('skip') }, 8000);
           }
         });
       });
@@ -2262,7 +2285,7 @@ async function boot() {
 
 boot().catch((e) => {
   console.error(e);
-  app.innerHTML = `<div class="empty"><h2>Qualcosa non va</h2><p>${esc(e.message)}</p></div>`;
+  app.innerHTML = `<div class="empty"><h2>${tr('Qualcosa non va')}</h2><p>${esc(e.message)}</p></div>`;
 });
 
 // per i test
