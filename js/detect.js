@@ -1,8 +1,10 @@
 // Riconoscimento della pagina su un'immagine piccola in scala di grigi.
 // Idea: la carta è la regione chiara più grande; se ne prendono i 4 angoli.
-import { otsu } from './proc.js';
+import { otsu, homography } from './proc.js';
 
-// gray: Uint8Array w×h. Restituisce { quad (normalizzato TL,TR,BR,BL), score } oppure null.
+// gray: Uint8Array w×h. Restituisce oppure null:
+//   quad: la pagina da usare (TL,TR,BR,BL normalizzati); full: tutta la regione chiara;
+//   spine: la piega del libro aperto, se c'è; halves: [sinistra, destra] divise lungo la piega.
 export function detectQuad(gray, w, h) {
   const n = w * h;
   // Sfocatura 3×3 per togliere rumore e testo minuto.
@@ -65,7 +67,7 @@ export function detectQuad(gray, w, h) {
   const frac = bestSize / n;
   if (frac < 0.12 || frac > 0.985) return null;
 
-  // Angoli: punti estremi lungo le diagonali, provati con due orientamenti.
+  // Angoli iniziali: punti estremi lungo le diagonali, provati con due orientamenti.
   const cand = [cornersAt(lab, best, w, h, 0), cornersAt(lab, best, w, h, Math.PI / 4)];
   let q = null;
   let qa = 0;
@@ -75,9 +77,195 @@ export function detectQuad(gray, w, h) {
     if (a > qa) { qa = a; q = c; }
   }
   if (!q || !convex(q)) return null;
+  // Angoli precisi: una retta per ogni bordo, poi le intersezioni. Un dito su un angolo
+  // o un angolo smussato non spostano più il punto, perché conta tutto il lato.
+  const refined = refineCorners(lab, best, w, h, q);
+  if (refined && convex(refined) && minAngle(refined) >= 50) q = refined;
+  qa = area(q);
   const fill = bestSize / qa; // quanto la regione riempie il quadrilatero
-  if (fill < 0.82 || minAngle(q) < 50) return null;
-  return { quad: q.map(([x, y]) => [x / w, y / h]), score: Math.min(1, fill) };
+  if (fill < 0.8 || minAngle(q) < 50) return null;
+  const norm = (pts) => pts.map(([x, y]) => [Math.min(1, Math.max(0, x / w)), Math.min(1, Math.max(0, y / h))]);
+  const full = norm(q);
+
+  // Libro aperto: si cerca la piega tra le due pagine.
+  const sp = findSpine(b, w, h, q);
+  let quad = full;
+  let halves = null;
+  let spine = null;
+  if (sp) {
+    spine = norm(sp.line);
+    halves = [norm([q[0], sp.line[0], sp.line[1], q[3]]), norm([sp.line[0], q[1], q[2], sp.line[1]])];
+    // Con lo scatto singolo si tiene la pagina intera: quella più larga, se l'altra si vede solo in parte.
+    if (sp.f < 0.42) quad = halves[1];
+    else if (sp.f > 0.58) quad = halves[0];
+  }
+  return { quad, full, spine, halves, score: Math.min(1, fill) };
+}
+
+// Bordo della regione: pixel della componente con almeno un vicino fuori.
+function boundary(lab, L, w, h) {
+  const pts = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (lab[i] !== L) continue;
+      if (x === 0 || y === 0 || x === w - 1 || y === h - 1 || lab[i - 1] !== L || lab[i + 1] !== L || lab[i - w] !== L || lab[i + w] !== L) {
+        pts.push([x + 0.5, y + 0.5]);
+      }
+    }
+  }
+  return pts;
+}
+
+// Retta ai minimi quadrati totali: { p (punto), d (direzione) }.
+function fitLine(pts) {
+  let mx = 0; let my = 0;
+  for (const [x, y] of pts) { mx += x; my += y; }
+  mx /= pts.length; my /= pts.length;
+  let xx = 0; let yy = 0; let xy = 0;
+  for (const [x, y] of pts) { xx += (x - mx) ** 2; yy += (y - my) ** 2; xy += (x - mx) * (y - my); }
+  const th = 0.5 * Math.atan2(2 * xy, xx - yy);
+  return { p: [mx, my], d: [Math.cos(th), Math.sin(th)] };
+}
+
+function intersect(a, b) {
+  const det = a.d[0] * b.d[1] - a.d[1] * b.d[0];
+  if (Math.abs(det) < 1e-6) return null;
+  const t = ((b.p[0] - a.p[0]) * b.d[1] - (b.p[1] - a.p[1]) * b.d[0]) / det;
+  return [a.p[0] + t * a.d[0], a.p[1] + t * a.d[1]];
+}
+
+function refineCorners(lab, L, w, h, q) {
+  const pts = boundary(lab, L, w, h);
+  const diag = Math.hypot(w, h);
+  const lines = [];
+  for (let k = 0; k < 4; k++) {
+    const A = q[k];
+    const B = q[(k + 1) % 4];
+    const len = Math.hypot(B[0] - A[0], B[1] - A[1]);
+    if (len < 8) return null;
+    const d = [(B[0] - A[0]) / len, (B[1] - A[1]) / len];
+    const nrm = [-d[1], d[0]];
+    // punti vicini al lato, lontani dagli angoli (dove ci sono dita e smussature)
+    let sel = pts.filter(([x, y]) => {
+      const t = ((x - A[0]) * d[0] + (y - A[1]) * d[1]) / len;
+      const dist = Math.abs((x - A[0]) * nrm[0] + (y - A[1]) * nrm[1]);
+      return t > 0.12 && t < 0.88 && dist < diag * 0.05;
+    });
+    if (sel.length < 8) return null;
+    let line = fitLine(sel);
+    // seconda passata: solo i punti davvero sulla retta (tolgono pieghe, dita, ombre)
+    for (const tol of [3, 1.6]) {
+      const dist = (pt) => Math.abs((pt[0] - line.p[0]) * -line.d[1] + (pt[1] - line.p[1]) * line.d[0]);
+      const near = sel.filter((pt) => dist(pt) < tol);
+      if (near.length < 8) break;
+      line = fitLine(near);
+      sel = near;
+    }
+    lines.push(line);
+  }
+  const out = [];
+  for (let k = 0; k < 4; k++) {
+    const c = intersect(lines[(k + 3) % 4], lines[k]);
+    if (!c) return null;
+    // il nuovo angolo non può allontanarsi troppo da quello iniziale né uscire dall'immagine
+    if (Math.hypot(c[0] - q[k][0], c[1] - q[k][1]) > diag * 0.12) return null;
+    if (c[0] < -w * 0.04 || c[0] > w * 1.04 || c[1] < -h * 0.04 || c[1] > h * 1.04) return null;
+    out.push(c);
+  }
+  return out;
+}
+
+// Cerca la piega di un libro aperto dentro il quadrilatero q: una linea quasi verticale, continua
+// dall'alto in basso (il bordo di una pagina o l'ombra della rilegatura).
+// Restituisce { line: [puntoAlto, puntoBasso] in pixel, f: posizione da 0 a 1 } oppure null.
+function findSpine(g, w, h, q) {
+  const top = Math.hypot(q[1][0] - q[0][0], q[1][1] - q[0][1]);
+  const side = Math.hypot(q[3][0] - q[0][0], q[3][1] - q[0][1]);
+  const RW = 180;
+  const RH = Math.max(90, Math.min(260, Math.round((RW * side) / top)));
+  const H = homography(RW, RH, q);
+  const r = new Float32Array(RW * RH);
+  for (let v = 0; v < RH; v++) {
+    for (let u = 0; u < RW; u++) {
+      const z = H[6] * u + H[7] * v + H[8];
+      const x = Math.min(w - 1, Math.max(0, Math.round((H[0] * u + H[1] * v + H[2]) / z)));
+      const y = Math.min(h - 1, Math.max(0, Math.round((H[3] * u + H[4] * v + H[5]) / z)));
+      r[v * RW + u] = g[y * w + x];
+    }
+  }
+  // Per ogni colonna: in quante righe c'è un salto netto di luminosità (bordo continuo) e quanto è scura.
+  const v0 = Math.round(RH * 0.06);
+  const v1 = Math.round(RH * 0.94);
+  const half = Math.round((v0 + v1) / 2);
+  const cons = (a, b) => {
+    const out = new Float32Array(RW);
+    for (let u = 2; u < RW - 2; u++) {
+      let c = 0;
+      for (let v = a; v < b; v++) {
+        const o = v * RW;
+        let m = 0;
+        for (let k = -1; k <= 1; k++) m = Math.max(m, Math.abs(r[o + u + k + 1] - r[o + u + k - 1]));
+        if (m > 9) c++;
+      }
+      out[u] = c / (b - a);
+    }
+    return out;
+  };
+  const cAll = cons(v0, v1);
+  const cTop = cons(v0, half);
+  const cBot = cons(half, v1);
+  const lum = new Float32Array(RW);
+  for (let u = 0; u < RW; u++) {
+    let s = 0;
+    for (let v = v0; v < v1; v++) s += r[v * RW + u];
+    lum[u] = s / (v1 - v0);
+  }
+  const lo = Math.round(RW * 0.1);
+  const hi = Math.round(RW * 0.9);
+  const win = Math.round(RW * 0.1);
+  let best = -1;
+  let bestScore = 0;
+  for (let u = lo; u <= hi; u++) {
+    let ml = 0; let mr = 0; let sl = 0; let sr = 0; let nl = 0; let nr = 0;
+    for (let k = Math.max(0, u - win); k < u - 2; k++) { ml = Math.max(ml, lum[k]); sl += lum[k]; nl++; }
+    for (let k = u + 3; k <= Math.min(RW - 1, u + win); k++) { mr = Math.max(mr, lum[k]); sr += lum[k]; nr++; }
+    const valley = Math.max(0, Math.min(ml, mr) - lum[u]);
+    const step = Math.abs(sl / Math.max(1, nl) - sr / Math.max(1, nr)); // le due pagine hanno luce diversa
+    // bordo continuo in entrambe le metà, oppure una valle d'ombra marcata con un bordo abbastanza continuo
+    // la piega può essere inclinata: nell'altra metà si cerca qualche colonna più in là
+    const nb = (arr) => { let m = 0; for (let k = Math.max(lo, u - 6); k <= Math.min(hi, u + 6); k++) m = Math.max(m, arr[k]); return m; };
+    const t = cTop[u];
+    const bt = nb(cBot);
+    const b2 = cBot[u];
+    const tt = nb(cTop);
+    const edge = (t > 0.55 && bt > 0.5) || (b2 > 0.55 && tt > 0.5)
+      // bordo molto netto in una metà e debole nell'altra: vale solo se le due parti hanno luminosità diversa
+      || (step > 5 && ((t > 0.8 && bt > 0.3) || (b2 > 0.8 && tt > 0.3)));
+    const ok = edge || (valley > 14 && cAll[u] > 0.3);
+    if (!ok) continue;
+    const score = Math.max(t + bt, b2 + tt) / 2 + valley / 40;
+    if (score > bestScore) { bestScore = score; best = u; }
+  }
+  if (best < 0) return null;
+  // la piega può essere inclinata: posizione migliore separatamente in alto e in basso
+  const near = (arr) => {
+    let m = best;
+    for (let u = Math.max(lo, best - 7); u <= Math.min(hi, best + 7); u++) if (arr[u] > arr[m]) m = u;
+    return m;
+  };
+  const ut = near(cTop);
+  const ub = near(cBot);
+  const map = (u, v) => {
+    const z = H[6] * u + H[7] * v + H[8];
+    return [(H[0] * u + H[1] * v + H[2]) / z, (H[3] * u + H[4] * v + H[5]) / z];
+  };
+  // dalla metà alta e bassa si estende la retta fino ai bordi superiore e inferiore
+  const yt = (v0 + half) / 2;
+  const yb = (half + v1) / 2;
+  const slope = (ub - ut) / (yb - yt);
+  const uAt = (v) => ut + (v - yt) * slope;
+  return { line: [map(uAt(0) + 0.5, 0), map(uAt(RH) + 0.5, RH)], f: (uAt(RH / 2) + 0.5) / RW };
 }
 
 function dilate(s, w, h) {

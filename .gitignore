@@ -4,3 +4,5 @@ tests/out/
 tests/fixtures/cam.y4m
 tests/fixtures/f?.png
 .DS_Store
+tests/fixtures/real/libro-aperto.jpg
+tests/fixtures/real/storia.jpg

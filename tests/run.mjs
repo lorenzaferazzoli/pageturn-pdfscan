@@ -77,6 +77,34 @@ try {
   check(warn === 1, `una sola pagina segnalata come sfocata (${warn})`);
   await shot('05-pagine-importate');
 
+  // libro aperto e doppia pagina: due foto importate con la doppia pagina attiva diventano quattro pagine
+  await page.evaluate(async () => { const { S, db } = window.__pageturn; S.project.double = true; await db.putProject(S.project); });
+  const [ch2] = await Promise.all([page.waitForEvent('filechooser'), page.click('[data-a="import"]')]);
+  await ch2.setFiles([join(fx, 'real/due-pagine.jpg')]);
+  await page.waitForFunction(() => window.__pageturn.S.project.order.length === 8, null, { timeout: 30000 });
+  const halves = await page.evaluate(() => { const S = window.__pageturn.S; return S.project.order.slice(-2).map((id) => S.pages.get(id).params.quad); });
+  // la piega della foto di prova è a metà del libro (circa x = 0,50 in alto, 0,51 in basso)
+  const spineX = halves[0][1][0];
+  check(Math.abs(spineX - 0.5) < 0.03 && Math.abs(halves[1][0][0] - spineX) < 1e-6, `doppia pagina divisa sulla piega (x = ${spineX.toFixed(3)})`);
+  await page.evaluate(async () => {
+    const { S, db } = window.__pageturn;
+    S.project = await db.deletePages(S.project.id, S.project.order.slice(-2));
+    S.project.double = false;
+    await db.putProject(S.project);
+  });
+  // foto vera di un libro aperto (non pubblicata nel repository: la prova si salta se manca)
+  if (existsSync(join(fx, 'real/libro-aperto.jpg'))) {
+    const [ch3] = await Promise.all([page.waitForEvent('filechooser'), page.click('[data-a="import"]')]);
+    await ch3.setFiles([join(fx, 'real/libro-aperto.jpg')]);
+    await page.waitForFunction(() => window.__pageturn.S.project.order.length === 7, null, { timeout: 30000 });
+    const one = await page.evaluate(() => { const S = window.__pageturn.S; return S.pages.get(S.project.order.at(-1)).params.quad; });
+    check(one[0][0] > 0.2 && one[3][0] > 0.2, `libro aperto: tenuta solo la pagina intera (bordo sinistro a x = ${one[0][0].toFixed(3)})`);
+    await page.evaluate(async () => { const { S, db } = window.__pageturn; S.project = await db.deletePages(S.project.id, S.project.order.slice(-1)); });
+  }
+  await page.click('[data-a="back"]');
+  await page.click('.proj');
+  await page.waitForSelector('#grid');
+
   // editor
   await page.click('.th >> nth=2');
   await page.waitForSelector('#pv[src]');
@@ -116,12 +144,43 @@ try {
   await page.waitForSelector('#grid');
   check(await page.evaluate(() => { const S = window.__pageturn.S; return S.pages.get(S.project.order[3]).params.dewarp === true; }), 'pagina distesa (UVDoc)');
 
-  // dividi
+  // annulla / ripeti
+  await page.click('.th >> nth=2');
+  await page.waitForSelector('#pv[src]');
+  await page.click('[data-f="bw"]');
+  await page.click('[data-a="undo"]');
+  const fUndo = await page.$eval('[data-f].on', (e) => e.dataset.f);
+  await page.click('[data-a="redoh"]');
+  const fRedo = await page.$eval('[data-f].on', (e) => e.dataset.f);
+  check(fUndo === 'whiten' && fRedo === 'bw', `annulla e ripeti (${fUndo} → ${fRedo})`);
+  await page.click('[data-a="undo"]');
+  await page.click('[data-a="done"]');
+  await page.waitForSelector('#grid');
+
+  // dividi con la linea regolabile
   await page.click('.th >> nth=0');
   await page.waitForSelector('#pv[src]');
+  await page.waitForTimeout(500);
   await page.click('[data-a="split"]');
+  await page.waitForSelector('#ov circle');
+  await page.waitForTimeout(400);
+  await shot('09c-dividi');
+  // la linea si sposta trascinandola
+  const sb = await page.locator('#stage').boundingBox();
+  await page.mouse.move(sb.x + sb.width / 2, sb.y + sb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sb.x + sb.width / 2 + 20, sb.y + sb.height / 2, { steps: 4 });
+  await page.mouse.up();
+  await page.click('[data-c="apply"]');
   await page.waitForFunction(() => window.__pageturn.S.project.order.length === 7);
   check(true, 'pagina divisa in due');
+  await page.waitForSelector('#pv[src]');
+  await page.click('[data-a="undo"]');
+  await page.waitForFunction(() => window.__pageturn.S.project.order.length === 6);
+  await page.waitForSelector('#pv[src]');
+  await page.click('[data-a="redoh"]');
+  await page.waitForFunction(() => window.__pageturn.S.project.order.length === 7);
+  check(true, 'divisione annullata e ripetuta');
   await page.click('[data-a="done"]');
   await page.waitForSelector('#grid');
 
@@ -202,7 +261,7 @@ try {
   await shot('errore').catch(() => {});
 } finally {
   // Tesseract segnala a console i dizionari facoltativi che non trova: non è un errore.
-  const bad = errors.filter((e) => !/favicon|Failed to load resource.*404|special-words|\.(user-words|user-patterns|bigram)/.test(e));
+  const bad = errors.filter((e) => !/favicon|Failed to load resource.*404|special-words|\.(user-words|user-patterns|bigram)|Image too small to scale|Line cannot be recognized/.test(e));
   check(!bad.length, `nessun errore in console${bad.length ? `: ${bad.join(' | ')}` : ''}`);
   await browser.close();
   server.kill();

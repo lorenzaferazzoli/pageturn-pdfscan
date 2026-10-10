@@ -13,7 +13,10 @@ Scanner di libri in PDF che gira nel browser del telefono. Niente app store, nie
 - **Backup automatico sul tuo server** (facoltativo). Ogni foto parte verso il tuo server appena salvata; se la rete manca, riprova da sola. In più puoi esportare il progetto in un file .zip e reimportarlo.
 - **Pagina raddrizzata** con la correzione della prospettiva, angoli regolabili a mano.
 - **Sbiancamento:** carta bianca, ombra della piega e ingiallimento rimossi. Filtri Originale, Sbianca, Grigi, B/N, con luminosità e contrasto.
-- **Doppia pagina:** uno scatto del libro aperto diventa due pagine. Si può anche dividere una pagina dopo.
+- **Libro aperto:** trova la piega tra le due pagine. Con lo scatto singolo tiene la pagina intera e scarta il pezzo dell'altra; con *Doppia pagina* ogni scatto diventa due pagine, divise lungo la piega.
+- **Angoli precisi:** gli angoli sono le intersezioni dei quattro bordi, quindi un dito su un angolo o un angolo smussato non li spostano.
+- **Dividi** con una linea che parte sulla piega trovata e si può spostare e inclinare.
+- **Annulla e ripeti** per tutte le modifiche della pagina, divisione compresa.
 - **Gomma** per macchie, segni a matita e dita sul bordo.
 - **Avviso sulle foto mosse**, rotazione, riordino trascinando, riscatto di una singola pagina.
 - **Pagine curve:** lo strumento *Distendi* raddrizza le righe piegate vicino alla rilegatura (modello UVDoc), su una pagina o su tutte quelle selezionate.
@@ -76,7 +79,7 @@ Le foto restano sul telefono e, se lo configuri, sul tuo server. L'OCR avviene s
 
 ## Limiti noti
 
-- *Distendi* funziona bene sulle curvature normali dei libri aperti; con pieghe molto forti può deformare i bordi della pagina. Si vede subito nell'anteprima, e si può disattivare.
+- *Distendi* lavora sulla foto attorno alla pagina e lascia intatte le pagine già piatte; con pieghe molto forti può deformare i bordi. Si vede subito nell'anteprima, si può disattivare e annullare.
 - Il riconoscimento della pagina cerca la carta chiara su uno sfondo più scuro. Su un tavolo bianco conviene lo scatto manuale e la regolazione degli angoli.
 - Con la fotocamera dentro l'app la risoluzione è quella del video (fino a 4K, dipende dal telefono). Per le pagine con caratteri minuti c'è la fotocamera di iOS a piena risoluzione.
 - L'OCR sul telefono richiede qualche secondo a pagina (il motore *Preciso* circa il triplo di *Veloce*); per un libro intero conviene lasciare l'app aperta in carica. La prima volta scarica i modelli: circa 27 MB per *Preciso*, 10 MB per *Veloce*, 31 MB per *Distendi*.
@@ -104,6 +107,7 @@ npm install
 npm start                    # http://localhost:8080
 npm test                     # prova completa in Chromium con una finta fotocamera
 node tests/stress.mjs 120    # prova di carico
+node tests/detect-check.mjs  # disegna il riconoscimento delle pagine su tests/out/
 npm run vendor               # dopo aver aggiornato le librerie
 sh scripts/paddle-models.sh  # per riscaricare i modelli PaddleOCR
 ```

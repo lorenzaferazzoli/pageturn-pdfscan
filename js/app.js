@@ -4,10 +4,10 @@ import * as sync from './sync.js';
 import { Camera } from './camera.js';
 import { icon } from './icons.js';
 import { renderPage, detectPage } from './jobs.js';
-import { splitQuad, FULL_QUAD } from './proc.js';
+import { splitQuad, FULL_QUAD, homography } from './proc.js';
 import { ENGINES as OCR_ENGINES } from './ocr.js';
 
-export const VERSION = '1.1.0';
+export const VERSION = '1.2.0';
 export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------
@@ -213,6 +213,7 @@ function show(html, cls = '') {
 }
 
 async function loadProject(id) {
+  if (!S.project || S.project.id !== id) editHistory.clear();
   S.project = await db.getProject(id);
   S.pages = await db.getPages(id);
   return S.project;
@@ -229,23 +230,21 @@ async function importFiles(files, { replaceId, index } = {}) {
     for (let i = 0; i < list.length; i++) {
       // Prima si salva la foto così com'è, poi si cerca la pagina.
       let blob = list[i];
-      let quad = null;
+      let det = null;
       try {
         const r = await detectPage(blob);
-        quad = r.found ? r.found.quad : null;
+        det = r.found;
       } catch {
         // formato non leggibile dal browser (es. HEIC su browser non Apple)
         toast('Questo formato di immagine non è supportato');
         continue;
       }
-      const page = newPage(quad);
-      S.project = await db.addPages(S.project.id, [{ page, orig: blob }], {
+      const items = pagesFor(blob, det, !replaceId && S.project.double);
+      S.project = await db.addPages(S.project.id, items, {
         replaceId: i === 0 ? replaceId : undefined,
-        index: index != null ? index + i : undefined,
+        index: index != null ? index + ids.length : undefined,
       });
-      S.pages.set(page.id, page);
-      queue.enqueue(page.id);
-      ids.push(page.id);
+      for (const it of items) { S.pages.set(it.page.id, it.page); queue.enqueue(it.page.id); ids.push(it.page.id); }
       t && t.set(`Importo ${i + 1} di ${list.length}…`);
     }
   } catch (e) {
@@ -255,6 +254,18 @@ async function importFiles(files, { replaceId, index } = {}) {
   }
   sync.kick();
   return ids;
+}
+
+// Pagine da creare per una foto: una sola, oppure due se è attiva la doppia pagina
+// (divise lungo la piega trovata, o a metà se la piega non si vede).
+function pagesFor(blob, det, double) {
+  if (double && det) {
+    const [l, r] = det.halves || splitQuad(det.full || det.quad);
+    const a = newPage(l);
+    const b = newPage(r, { origId: a.id });
+    return [{ page: a, orig: blob }, { page: b, orig: null }];
+  }
+  return [{ page: newPage(det ? det.quad : null), orig: blob }];
 }
 
 function toastProgress(msg) {
@@ -739,21 +750,13 @@ async function camera({ replaceId } = {}) {
     hint.textContent = phase === 'turn' ? 'Gira pagina' : manual ? 'Pagina rilevata · scatta quando vuoi' : ready ? 'Tieni fermo' : 'Pagina rilevata';
   };
 
-  const onCapture = async (blob, quad) => {
+  const onCapture = async (blob, det) => {
     const f = $('#flash', el);
     f.classList.remove('go');
     void f.offsetWidth;
     f.classList.add('go');
     try {
-      let items;
-      if (double && quad && !replaceId) {
-        const [l, r] = splitQuad(quad);
-        const a = newPage(l);
-        const b = newPage(r, { origId: a.id });
-        items = [{ page: a, orig: blob }, { page: b, orig: null }];
-      } else {
-        items = [{ page: newPage(quad), orig: blob }];
-      }
+      const items = pagesFor(blob, det, double && !replaceId);
       S.project = await db.addPages(P.id, items, { replaceId });
       for (const it of items) { S.pages.set(it.page.id, it.page); queue.enqueue(it.page.id); }
       sync.kick();
@@ -866,6 +869,51 @@ function maybeRemindBackup() {
 // =====================================================================
 // MODIFICA PAGINA
 // =====================================================================
+// Cronologia delle modifiche (annulla / ripeti), per pagina, finché si resta nel libro.
+const editHistory = new Map();
+const hist = (id) => {
+  if (!editHistory.has(id)) editHistory.set(id, { undo: [], redo: [] });
+  return editHistory.get(id);
+};
+
+// Rotazione di un punto normalizzato di k quarti di giro in senso orario (come la pagina).
+const rotPt = ([x, y], k) => {
+  for (let i = 0; i < ((k % 4) + 4) % 4; i++) [x, y] = [1 - y, x];
+  return [x, y];
+};
+
+// Parti di una pagina divisa lungo una linea dall'alto (xt) al basso (xb) dell'anteprima,
+// nello spazio della pagina non ruotata; poi riportate nella foto originale.
+function splitByLine(quad, k, xt, xb) {
+  const P = rotPt([xt, 0], 4 - k);
+  const Q = rotPt([xb, 1], 4 - k);
+  let first;
+  let second;
+  if (k === 0) { first = [[0, 0], P, Q, [0, 1]]; second = [P, [1, 0], [1, 1], Q]; }
+  else if (k === 2) { first = [Q, [1, 0], [1, 1], P]; second = [[0, 0], Q, P, [0, 1]]; }
+  else if (k === 1) { first = [P, Q, [1, 1], [0, 1]]; second = [[0, 0], [1, 0], Q, P]; }
+  else { first = [[0, 0], [1, 0], P, Q]; second = [Q, P, [1, 1], [0, 1]]; }
+  const H = homography(1, 1, quad);
+  const map = ([u, v]) => {
+    const z = H[6] * u + H[7] * v + H[8];
+    return [(H[0] * u + H[1] * v + H[2]) / z, (H[3] * u + H[4] * v + H[5]) / z];
+  };
+  return [first.map(map), second.map(map)];
+}
+
+// Dalla foto originale all'anteprima: inversa dell'omografia del ritaglio, poi rotazione.
+function origToPreview(quad, k, pt) {
+  const H = homography(1, 1, quad);
+  const [a, b, c, d, e, f, g, h] = H;
+  // inversa 3×3
+  const A = e - f * h; const B = f * g - d; const C = d * h - e * g;
+  const D = c * h - b; const E = a - c * g; const F = b * g - a * h;
+  const G = b * f - c * e; const Hh = c * d - a * f; const I = a * e - b * d;
+  const [x, y] = pt;
+  const z = C * x + F * y + I;
+  return rotPt([(A * x + D * y + G) / z, (B * x + E * y + Hh) / z], k);
+}
+
 async function editor(pageId) {
   S.view = 'editor';
   const P = S.project;
@@ -893,7 +941,8 @@ async function editor(pageId) {
       </div>
       <div class="side r"><button class="link" data-a="done">Fatto</button></div>
     </div>
-    <div class="stage" id="stage"><img id="pv" alt=""><svg id="ov"></svg><canvas id="cv"></canvas><span class="busy" id="busy" hidden>${icon('loader-2', 'spinner')}</span></div>
+    <div class="stage" id="stage"><img id="pv" alt=""><svg id="ov"></svg><canvas id="cv"></canvas><span class="busy" id="busy" hidden>${icon('loader-2', 'spinner')}</span>
+      <div class="histbtns"><button class="circle glass" data-a="undo" aria-label="Annulla">${icon('arrow-back-up')}</button><button class="circle glass" data-a="redoh" aria-label="Ripeti">${icon('arrow-forward-up')}</button></div></div>
     <div id="controls"></div>`);
   const stage = $('#stage', el);
   const pv = $('#pv', el);
@@ -936,6 +985,56 @@ async function editor(pageId) {
     preview(110);
   }
 
+  // ---- annulla / ripeti ----
+  const H0 = hist(page.id);
+  let lastMark = 0;
+  // da chiamare prima di ogni modifica: i movimenti continui dei cursori diventano un solo passo
+  function mark(group = '') {
+    const now = Date.now();
+    if (group && group === mark.g && now - lastMark < 800) { lastMark = now; return; }
+    mark.g = group;
+    lastMark = now;
+    H0.undo.push({ t: 'p', params: structuredClone(params) });
+    if (H0.undo.length > 60) H0.undo.shift();
+    H0.redo.length = 0;
+    histButtons();
+  }
+  function histButtons() {
+    const u = $('[data-a="undo"]', el);
+    const r = $('[data-a="redoh"]', el);
+    if (u) u.style.opacity = H0.undo.length ? 1 : 0.35;
+    if (r) r.style.opacity = H0.redo.length ? 1 : 0.35;
+  }
+  async function stepHistory(from, to) {
+    const e = from.pop();
+    if (!e) return;
+    mark.g = '';
+    if (e.t === 'p') {
+      to.push({ t: 'p', params: structuredClone(params) });
+      for (const k of Object.keys(params)) delete params[k];
+      Object.assign(params, structuredClone(e.params));
+      dirty = true;
+      toView(true);
+      histButtons();
+    } else if (e.t === 'split') {
+      if (from === H0.undo) {
+        // annulla la divisione: via la pagina gemella, torna il ritaglio di prima
+        S.project = await db.deletePages(P.id, [e.twinId]);
+        S.pages.delete(e.twinId);
+        sync.pushProject(S.project);
+        to.push({ t: 'split', line: e.line, params: structuredClone(e.params) });
+        Object.assign(params, structuredClone(e.params));
+        dirty = true;
+        await commit();
+        toast('Divisione annullata');
+        editor(page.id);
+      } else {
+        Object.assign(params, structuredClone(e.params));
+        await doSplit(e.line[0], e.line[1], { keepRedo: true });
+      }
+    }
+  }
+
   // rettangolo occupato dall'immagine dentro lo stage (object-fit: contain, margine 10px)
   function imgRect(nw, nh) {
     const W = stage.clientWidth - 20;
@@ -966,11 +1065,13 @@ async function editor(pageId) {
         <button class="tool" data-a="more">${icon('dots')}Altro</button>
       </div>`;
     $$('[data-f]', controls).forEach((b) => (b.onclick = () => {
+      mark();
       params.filter = b.dataset.f;
       $$('[data-f]', controls).forEach((x) => x.classList.toggle('on', x === b));
       change();
     }));
     $$('input[type=range]', controls).forEach((r) => (r.oninput = () => {
+      mark(r.dataset.k);
       params[r.dataset.k] = +r.value;
       r.style.setProperty('--p', `${(+r.value + 100) / 2}%`);
       r.nextElementSibling.textContent = `${+r.value > 0 ? '+' : ''}${r.value}`;
@@ -1008,6 +1109,7 @@ async function editor(pageId) {
       } else if (k === 'full') { quad = structuredClone(FULL_QUAD); drawCrop(); }
       else if (k === 'cancel') toView(!pvURL);
       else if (k === 'apply') {
+        mark();
         params.quad = quad;
         params.erase = []; // i tratti della gomma non corrispondono più
         dirty = true;
@@ -1079,7 +1181,7 @@ async function editor(pageId) {
       const c = e.target.closest('[data-c]');
       if (!c) return;
       if (c.dataset.c === 'undo') {
-        if (params.erase.length) { params.erase.pop(); change(); }
+        if (params.erase.length) { mark(); params.erase.pop(); change(); }
       } else toView(false);
     };
   }
@@ -1101,6 +1203,7 @@ async function editor(pageId) {
   }
   function eraseEnd() {
     if (!stroke) return;
+    mark();
     params.erase = params.erase || [];
     params.erase.push({ r: stroke.r, pts: stroke.pts.map(([x, y]) => [+x.toFixed(4), +y.toFixed(4)]) });
     stroke = null;
@@ -1158,6 +1261,7 @@ async function editor(pageId) {
   };
 
   panelView();
+  histButtons();
 
   el.onclick = async (e) => {
     const t = e.target.closest('[data-a]');
@@ -1170,7 +1274,10 @@ async function editor(pageId) {
       if (P.order[j]) editor(P.order[j]);
     } else if (a === 'crop') panelCrop();
     else if (a === 'erase') panelErase();
+    else if (a === 'undo') stepHistory(H0.undo, H0.redo);
+    else if (a === 'redoh') stepHistory(H0.redo, H0.undo);
     else if (a === 'rotate') {
+      mark();
       // anche i tratti della gomma ruotano con la pagina
       const asp = pw / ph;
       params.erase = (params.erase || []).map((s) => ({ r: s.r * asp, pts: s.pts.map(([x, y]) => [1 - y, x]) }));
@@ -1178,6 +1285,7 @@ async function editor(pageId) {
       [pw, ph] = [ph, pw];
       change();
     } else if (a === 'dewarp') {
+      mark();
       params.dewarp = !params.dewarp;
       t.classList.toggle('on', params.dewarp);
       // i tratti della gomma erano sulla pagina non distesa
@@ -1187,12 +1295,13 @@ async function editor(pageId) {
         db.kvSet('uvLoaded', true);
       }
       change();
-    } else if (a === 'split') splitPage();
+    } else if (a === 'split') panelSplit();
     else if (a === 'redo') { await commit(); camera({ replaceId: page.id }); }
     else if (a === 'more') {
       menuSheet(`Pagina ${idx + 1}`, [
         { label: 'Nuova pagina dopo questa', icon: 'square-plus', run: async () => { await commit(); pickPhotos({ index: idx + 1 }); } },
         { label: 'Ripristina la foto originale', icon: 'arrow-back-up', run: () => {
+          mark();
           Object.assign(params, { quad: FULL_QUAD, rotation: 0, filter: 'original', brightness: 0, contrast: 0, erase: [], dewarp: false });
           dirty = true;
           toView(true);
@@ -1213,23 +1322,92 @@ async function editor(pageId) {
     }
   };
 
-  async function splitPage() {
-    // si divide nel verso della pagina finita (tiene conto della rotazione)
-    const k = params.rotation || 0;
-    const q = params.quad || FULL_QUAD;
-    const out = [0, 1, 2, 3].map((i) => q[(i - k + 4) % 4]);
-    const [L, R] = splitQuad(out);
-    const back = (o) => [0, 1, 2, 3].map((j) => o[(j + k) % 4]);
-    params.quad = back(L);
+  // ---- dividi: linea di taglio regolabile, posizionata sulla piega se si trova ----
+  let line = [0.5, 0.5];
+  let dragL = null;
+  async function panelSplit() {
+    if (!pvURL) { toast('Attendi l’anteprima della pagina'); return; }
+    mode = 'split';
+    ov.innerHTML = '';
+    line = [0.5, 0.5];
+    controls.innerHTML = `
+      <div class="modehint">Sposta la linea sulla piega tra le due pagine. Trascina i cerchi per inclinarla</div>
+      <div class="bar"><button class="btn" data-c="cancel">Annulla</button><button class="btn primary" data-c="apply">Dividi</button></div>`;
+    drawSplit();
+    controls.onclick = async (e) => {
+      const c = e.target.closest('[data-c]');
+      if (!c) return;
+      if (c.dataset.c === 'cancel') { ov.innerHTML = ''; toView(false); }
+      else { ov.innerHTML = ''; await doSplit(line[0], line[1]); }
+    };
+    // posizione iniziale: la piega trovata nella foto, se cade dentro questa pagina
+    try {
+      const r = await detectPage(orig);
+      const sp = r.found && r.found.spine;
+      if (sp && mode === 'split') {
+        const k = params.rotation || 0;
+        const a = origToPreview(params.quad || FULL_QUAD, k, sp[0]);
+        const b = origToPreview(params.quad || FULL_QUAD, k, sp[1]);
+        if (Math.abs(b[1] - a[1]) > 0.5) {
+          const at = (y) => a[0] + ((y - a[1]) * (b[0] - a[0])) / (b[1] - a[1]);
+          const xt = at(0);
+          const xb = at(1);
+          if (xt > 0.05 && xt < 0.95 && xb > 0.05 && xb < 0.95) { line = [xt, xb]; drawSplit(); }
+        }
+      }
+    } catch { /* resta al centro */ }
+  }
+
+  function drawSplit() {
+    if (mode !== 'split') return;
+    const r = imgRect(pv.naturalWidth || pw, pv.naturalHeight || ph);
+    ov.setAttribute('viewBox', `0 0 ${stage.clientWidth} ${stage.clientHeight}`);
+    const T = [r.x + line[0] * r.w, r.y];
+    const B = [r.x + line[1] * r.w, r.y + r.h];
+    ov.innerHTML = `<line x1="${T[0]}" y1="${T[1]}" x2="${B[0]}" y2="${B[1]}" style="stroke:var(--accent);stroke-width:3;stroke-dasharray:8 6"/>
+      <circle class="handle" cx="${T[0]}" cy="${T[1]}" r="12"/><circle class="handle" cx="${B[0]}" cy="${B[1]}" r="12"/>`;
+  }
+
+  stage.addEventListener('pointerdown', (e) => {
+    if (mode !== 'split') return;
+    const r = imgRect(pv.naturalWidth || pw, pv.naturalHeight || ph);
+    const b = stage.getBoundingClientRect();
+    const x = e.clientX - b.left;
+    const y = e.clientY - b.top;
+    const dt = Math.hypot(x - (r.x + line[0] * r.w), y - r.y);
+    const db2 = Math.hypot(x - (r.x + line[1] * r.w), y - (r.y + r.h));
+    dragL = dt < 44 ? 'top' : db2 < 44 ? 'bottom' : 'both';
+    dragL = { which: dragL, x0: x, l0: line.slice() };
+    stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (mode !== 'split' || !dragL) return;
+    const r = imgRect(pv.naturalWidth || pw, pv.naturalHeight || ph);
+    const b = stage.getBoundingClientRect();
+    const dx = (e.clientX - b.left - dragL.x0) / r.w;
+    const cl = (v) => Math.min(0.97, Math.max(0.03, v));
+    if (dragL.which === 'top') line[0] = cl(dragL.l0[0] + dx);
+    else if (dragL.which === 'bottom') line[1] = cl(dragL.l0[1] + dx);
+    else { line[0] = cl(dragL.l0[0] + dx); line[1] = cl(dragL.l0[1] + dx); }
+    drawSplit();
+  });
+  stage.addEventListener('pointerup', () => { dragL = null; });
+
+  async function doSplit(xt, xb, { keepRedo = false } = {}) {
+    const before = structuredClone(params);
+    const [L, R] = splitByLine(params.quad || FULL_QUAD, params.rotation || 0, xt, xb);
+    params.quad = L;
     params.erase = [];
     dirty = true;
     await commit();
-    const twin = newPage(back(R), { origId: page.origId || page.id });
-    twin.params = { ...structuredClone(params), quad: back(R) };
+    const twin = newPage(R, { origId: page.origId || page.id });
+    twin.params = { ...structuredClone(params), quad: R };
     S.project = await db.addPages(P.id, [{ page: twin, orig: null }], { index: idx + 1 });
     S.pages.set(twin.id, twin);
     queue.enqueue(twin.id, true);
     sync.kick();
+    H0.undo.push({ t: 'split', twinId: twin.id, line: [xt, xb], params: before });
+    if (!keepRedo) H0.redo.length = 0;
     toast('Pagina divisa in due');
     editor(page.id);
   }

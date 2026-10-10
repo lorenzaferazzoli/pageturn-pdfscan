@@ -1,7 +1,8 @@
 // Fotocamera nell'app con riconoscimento della pagina e scatto automatico.
 import { detectQuad, frameDiff, quadDelta } from './detect.js';
 
-const AW = 200; // larghezza del fotogramma di analisi
+const AW = 220; // larghezza del fotogramma di analisi dal vivo
+const SHOT_W = 400; // allo scatto si rifà il riconoscimento più preciso (piega del libro compresa)
 
 export class Camera {
   constructor(video, { onState, onCapture }) {
@@ -163,12 +164,23 @@ export class Camera {
       c.width = v.videoWidth;
       c.height = v.videoHeight;
       c.getContext('2d').drawImage(v, 0, 0);
+      // riconoscimento preciso sul fotogramma scattato
+      const k = SHOT_W / Math.max(c.width, c.height);
+      const s = document.createElement('canvas');
+      s.width = Math.round(c.width * k);
+      s.height = Math.round(c.height * k);
+      const sx = s.getContext('2d', { willReadFrequently: true });
+      sx.drawImage(c, 0, 0, s.width, s.height);
+      const d = sx.getImageData(0, 0, s.width, s.height).data;
+      const g = new Uint8Array(s.width * s.height);
+      for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+      const det = detectQuad(g, s.width, s.height) || (quad ? { quad, full: quad, halves: null, spine: null } : null);
       const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.92));
       c.width = c.height = 0; // libera la memoria subito (Safari)
       this.lastShotGray = gray || (this.grabSmall() || {}).g;
       this.phase = 'turn';
       this.sawMotion = false;
-      await this.onCapture(blob, quad || (this.prevQuad ?? null));
+      await this.onCapture(blob, det);
     } finally {
       this.busy = false;
     }

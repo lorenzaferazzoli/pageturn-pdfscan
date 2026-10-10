@@ -286,3 +286,8 @@ button.li:active { background: var(--card-2); }
   .head, .nav { padding-left: 24px; padding-right: 24px; }
   .group, .banner { margin-left: 24px; margin-right: 24px; }
 }
+
+/* annulla / ripeti sopra l'anteprima */
+.histbtns { position: absolute; left: 10px; top: 10px; display: flex; gap: 8px; z-index: 2; }
+.histbtns .circle { width: 36px; height: 36px; }
+.histbtns .ic { width: 19px; height: 19px; }
