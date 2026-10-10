@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Server di Sfoglia: serve l'app e riceve il backup automatico delle pagine.
+// Server di Pageturn: serve l'app e riceve il backup automatico delle pagine.
 // Nessuna dipendenza: basta Node 18 o superiore.
 //
 //   node server/server.js
@@ -7,7 +7,7 @@
 // Variabili d'ambiente:
 //   PORT          porta (predefinita 8080)
 //   DATA_DIR      dove salvare i backup (predefinita ./data)
-//   SFOGLIA_TOKEN codice di accesso; se impostato, l'app deve inserirlo nelle impostazioni
+//   PAGETURN_TOKEN codice di accesso; se impostato, l'app deve inserirlo nelle impostazioni
 //   TLS_CERT, TLS_KEY  percorsi di certificato e chiave per servire direttamente in https
 //   CORS_ORIGIN   origine ammessa per l'app ospitata altrove (es. https://utente.github.io); predefinito *
 
@@ -22,7 +22,7 @@ import { timingSafeEqual } from 'node:crypto';
 const ROOT = normalize(join(dirname(fileURLToPath(import.meta.url)), '..'));
 const PORT = +process.env.PORT || 8080;
 const DATA = normalize(process.env.DATA_DIR || join(ROOT, 'data'));
-const TOKEN = process.env.SFOGLIA_TOKEN || '';
+const TOKEN = process.env.PAGETURN_TOKEN || '';
 const CORS = process.env.CORS_ORIGIN || '*';
 const MAX_IMAGE = 40 * 1024 * 1024;
 const MAX_JSON = 2 * 1024 * 1024;
@@ -46,7 +46,7 @@ function send(res, code, body, type = 'application/json') {
 
 function authorized(req) {
   if (!TOKEN) return true;
-  const got = Buffer.from(String(req.headers['x-sfoglia-token'] || ''));
+  const got = Buffer.from(String(req.headers['x-pageturn-token'] || ''));
   const want = Buffer.from(TOKEN);
   return got.length === want.length && timingSafeEqual(got, want);
 }
@@ -80,7 +80,7 @@ async function readJSON(path, def) {
 async function api(req, res, parts) {
   // parts: ['api', ...]
   if (parts[1] === 'health') {
-    return send(res, 200, { sfoglia: true, version: 1, auth: !!TOKEN, authorized: authorized(req) });
+    return send(res, 200, { pageturn: true, version: 1, auth: !!TOKEN, authorized: authorized(req) });
   }
   if (!authorized(req)) return send(res, 401, { error: 'codice di accesso errato' });
   if (parts[1] !== 'projects') return send(res, 404, { error: 'non trovato' });
@@ -176,7 +176,7 @@ async function handler(req, res) {
   if (parts[0] === 'api') {
     res.setHeader('access-control-allow-origin', CORS);
     res.setHeader('access-control-allow-methods', 'GET, PUT, DELETE, OPTIONS');
-    res.setHeader('access-control-allow-headers', 'content-type, x-sfoglia-token');
+    res.setHeader('access-control-allow-headers', 'content-type, x-pageturn-token');
     res.setHeader('access-control-max-age', '86400');
     if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
     try {
@@ -195,5 +195,5 @@ const server = process.env.TLS_CERT && process.env.TLS_KEY
   : http.createServer(handler);
 server.listen(PORT, () => {
   const proto = process.env.TLS_CERT ? 'https' : 'http';
-  console.log(`Sfoglia: ${proto}://localhost:${PORT}  (backup in ${DATA}${TOKEN ? ', con codice di accesso' : ''})`);
+  console.log(`Pageturn: ${proto}://localhost:${PORT}  (backup in ${DATA}${TOKEN ? ', con codice di accesso' : ''})`);
 });

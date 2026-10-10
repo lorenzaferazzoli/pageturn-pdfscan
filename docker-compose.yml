@@ -1,5 +1,5 @@
 services:
-  sfoglia:
+  pageturn:
     build: .
     ports:
       - "8080:8080"
@@ -7,5 +7,5 @@ services:
       - ./data:/data
     environment:
       # Codice di accesso da inserire nelle impostazioni dell'app (consigliato)
-      SFOGLIA_TOKEN: "cambiami"
+      PAGETURN_TOKEN: "cambiami"
     restart: unless-stopped

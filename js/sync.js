@@ -1,4 +1,4 @@
-// Backup automatico su un server Sfoglia (vedi server/server.js).
+// Backup automatico su un server Pageturn (vedi server/server.js).
 // Ogni foto originale viene caricata appena salvata; se la rete manca, si ritenta.
 import * as db from './db.js';
 
@@ -12,7 +12,7 @@ export async function init() {
   const saved = await db.kvGet('sync', null);
   if (saved) cfg = saved;
   else {
-    // Primo avvio: se l'app è servita da un server Sfoglia, il backup automatico si attiva da solo.
+    // Primo avvio: se l'app è servita da un server Pageturn, il backup automatico si attiva da solo.
     const ok = await health(location.origin, '').catch(() => null);
     if (ok) {
       cfg = { enabled: true, url: location.origin, token: '' };
@@ -44,17 +44,17 @@ function base() {
 }
 
 function headers(extra = {}) {
-  return cfg.token ? { 'x-sfoglia-token': cfg.token, ...extra } : extra;
+  return cfg.token ? { 'x-pageturn-token': cfg.token, ...extra } : extra;
 }
 
 export async function health(url = base(), token = cfg.token) {
   const r = await fetch(`${url.replace(/\/+$/, '')}/api/health`, {
-    headers: token ? { 'x-sfoglia-token': token } : {},
+    headers: token ? { 'x-pageturn-token': token } : {},
     cache: 'no-store',
   });
   if (!r.ok) throw new Error(r.status === 401 ? 'Codice di accesso errato' : `Errore ${r.status}`);
   const j = await r.json();
-  if (!j.sfoglia) throw new Error('Non è un server Sfoglia');
+  if (!j.pageturn) throw new Error('Non è un server Pageturn');
   if (j.auth && !j.authorized) throw new Error('Codice di accesso errato');
   return j;
 }

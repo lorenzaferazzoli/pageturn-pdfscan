@@ -1,10 +1,10 @@
-# Sfoglia
+# Pageturn
 
 Scanner di libri in PDF che gira nel browser del telefono. Niente app store, niente account, niente cloud di terzi: è una web app che si installa sulla schermata Home, funziona offline ed è open source.
 
-**Provala:** https://lorenzaferazzoli.github.io/sfoglia/
+**Provala:** https://lorenzaferazzoli.github.io/pageturn/
 
-![Schermate di Sfoglia](docs/schermate.png)
+![Schermate di Pageturn](docs/schermate.png)
 
 ## Cosa fa
 
@@ -23,9 +23,9 @@ Scanner di libri in PDF che gira nel browser del telefono. Niente app store, nie
 
 ## Installarla su iPhone
 
-1. Apri https://lorenzaferazzoli.github.io/sfoglia/ in **Safari**.
+1. Apri https://lorenzaferazzoli.github.io/pageturn/ in **Safari**.
 2. Tocca **Condividi**, poi **Aggiungi alla schermata Home**.
-3. Apri Sfoglia dall'icona e consenti l'accesso alla fotocamera.
+3. Apri Pageturn dall'icona e consenti l'accesso alla fotocamera.
 
 Installarla è importante: Safari può cancellare i dati dei siti che non visiti da 7 giorni, ma le app aggiunte alla schermata Home ne sono esenti.
 
@@ -38,15 +38,15 @@ Il server incluso serve l'app e riceve il backup automatico delle pagine. Non ha
 **Con Node 18 o superiore**
 
 ```sh
-git clone https://github.com/lorenzaferazzoli/sfoglia.git
-cd sfoglia
-SFOGLIA_TOKEN=un-codice-segreto node server/server.js
+git clone https://github.com/lorenzaferazzoli/pageturn.git
+cd pageturn
+PAGETURN_TOKEN=un-codice-segreto node server/server.js
 ```
 
 **Con Docker**
 
 ```sh
-docker compose up -d   # modifica prima SFOGLIA_TOKEN in docker-compose.yml
+docker compose up -d   # modifica prima PAGETURN_TOKEN in docker-compose.yml
 ```
 
 I backup finiscono in `./data/<libro>/pages/` come JPEG originali più un file .json per pagina.
@@ -65,7 +65,7 @@ Puoi anche usare l'app da GitHub Pages e il server solo per il backup: il server
 |---|---|---|
 | `PORT` | `8080` | porta |
 | `DATA_DIR` | `./data` | cartella dei backup |
-| `SFOGLIA_TOKEN` | nessuno | codice di accesso richiesto all'app |
+| `PAGETURN_TOKEN` | nessuno | codice di accesso richiesto all'app |
 | `TLS_CERT`, `TLS_KEY` | nessuno | https diretto |
 | `CORS_ORIGIN` | `*` | origine ammessa per l'app ospitata altrove |
 

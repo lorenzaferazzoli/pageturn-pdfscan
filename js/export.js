@@ -88,8 +88,8 @@ export async function buildPdf(project, { quality = 'medium', ocr = true, langs 
 
   const doc = await PDFDocument.create();
   doc.setTitle(project.name);
-  doc.setCreator('Sfoglia');
-  doc.setProducer('Sfoglia');
+  doc.setCreator('Pageturn');
+  doc.setProducer('Pageturn');
   const font = await doc.embedFont(StandardFonts.Helvetica);
   for (let i = 0; i < total; i++) {
     if (signal && signal.aborted) throw new DOMException('annullato', 'AbortError');
@@ -175,7 +175,7 @@ export async function buildBackup(project, onProgress) {
     const { ocr, ...rest } = p;
     list.push(rest);
   }
-  const meta = { format: 'sfoglia-backup', version: 1, exported: Date.now(), project: { ...project }, pages: list };
+  const meta = { format: 'pageturn-backup', version: 1, exported: Date.now(), project: { ...project }, pages: list };
   files['progetto.json'] = strToU8(JSON.stringify(meta, null, 1));
   return new Blob([zipSync(files)], { type: 'application/zip' });
 }
@@ -183,7 +183,7 @@ export async function buildBackup(project, onProgress) {
 // Ripristina un backup come nuovo progetto (non sovrascrive nulla di esistente).
 export async function importBackup(file) {
   const z = unzipSync(new Uint8Array(await file.arrayBuffer()));
-  if (!z['progetto.json']) throw new Error('Questo file non è un backup di Sfoglia');
+  if (!z['progetto.json']) throw new Error('Questo file non è un backup di Pageturn');
   const meta = JSON.parse(strFromU8(z['progetto.json']));
   const existing = await db.getProject(meta.project.id);
   const project = await db.createProject(existing ? `${meta.project.name} (ripristino)` : meta.project.name);

@@ -22,8 +22,8 @@ const maxGap = await p.evaluate(async (N) => {
   let last = performance.now(); let gap = 0;
   const id = setInterval(() => { const n = performance.now(); gap = Math.max(gap, n - last - 50); last = n; }, 50);
   while (true) {
-    const S = window.__sfoglia.S;
-    const pages = await window.__sfoglia.db.getPages(S.project.id);
+    const S = window.__pageturn.S;
+    const pages = await window.__pageturn.db.getPages(S.project.id);
     if (pages.size >= N && [...pages.values()].every((x) => x.status === 'done')) break;
     await new Promise((r) => setTimeout(r, 300));
   }

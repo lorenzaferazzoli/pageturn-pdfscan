@@ -7,7 +7,7 @@ import { renderPage, detectPage } from './jobs.js';
 import { splitQuad, FULL_QUAD } from './proc.js';
 
 export const VERSION = '1.0.0';
-export const REPO = 'https://github.com/lorenzaferazzoli/sfoglia';
+export const REPO = 'https://github.com/lorenzaferazzoli/pageturn';
 
 // ---------- utilità ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -146,7 +146,7 @@ function fileReadySheet(blob, name, title, onSaved) {
 async function applyTheme(t) {
   if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
-  try { localStorage.setItem('sfoglia-theme', t); } catch { /* privato */ }
+  try { localStorage.setItem('pageturn-theme', t); } catch { /* privato */ }
   await db.kvSet('theme', t);
 }
 
@@ -290,8 +290,8 @@ async function home() {
     <div class="nav"><div class="side"></div><div class="title"></div>
       <div class="side r"><button class="iconbtn" data-a="settings" aria-label="Impostazioni">${icon('settings')}</button></div></div>
     <div class="scroll">
-      <div class="head"><h1 class="large">Sfoglia</h1></div>
-      ${!standalone && !hideBanner ? `<div class="banner">${icon('device-floppy')}<div><b>Aggiungi Sfoglia alla schermata Home</b>
+      <div class="head"><h1 class="large">Pageturn</h1></div>
+      ${!standalone && !hideBanner ? `<div class="banner">${icon('device-floppy')}<div><b>Aggiungi Pageturn alla schermata Home</b>
         ${isIOS ? 'Tocca Condividi in Safari, poi «Aggiungi alla schermata Home».' : 'Installa l’app dal menu del browser.'}
         Così le scansioni non vengono cancellate dal browser.</div><button class="x" data-a="hidebanner" aria-label="Nascondi">${icon('x')}</button></div>` : ''}
       ${projects.length ? `<div class="group">${projects.map((p) => `
@@ -1348,7 +1348,7 @@ async function settings() {
     <div class="gl">Backup automatico sul server</div>
     <div class="card">
       <label class="li"><span>Attivo</span><span class="switch"><input type="checkbox" id="sen" ${cfg.enabled ? 'checked' : ''}><i></i></span></label>
-      <label class="li"><span>Indirizzo</span><input type="url" id="surl" placeholder="https://sfoglia.casa.it" value="${esc(cfg.url)}" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+      <label class="li"><span>Indirizzo</span><input type="url" id="surl" placeholder="https://pageturn.casa.it" value="${esc(cfg.url)}" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
       <label class="li"><span>Codice</span><input type="password" id="stok" placeholder="facoltativo" value="${esc(cfg.token)}"></label>
       <div class="li"><span>Stato</span><span class="r" id="sst">${syncText(st)}</span></div>
       <button class="li accent" data-a="test"><span>Verifica connessione</span>${icon('server')}</button>
@@ -1368,7 +1368,7 @@ async function settings() {
       <div class="li"><span>Versione</span><span class="r">${VERSION}</span></div>
       <a class="li accent" href="${REPO}" target="_blank" rel="noopener" style="text-decoration:none"><span>Codice sorgente su GitHub</span>${icon('chevron-right')}</a>
     </div>
-    <p class="note">Sfoglia è open source (licenza MIT). Le scansioni restano sul tuo dispositivo e sul tuo server: nessun dato passa da altri servizi.</p>`);
+    <p class="note">Pageturn è open source (licenza MIT). Le scansioni restano sul tuo dispositivo e sul tuo server: nessun dato passa da altri servizi.</p>`);
 
   $$('#theme button', s.el).forEach((b) => (b.onclick = () => {
     applyTheme(b.dataset.t);
@@ -1510,4 +1510,4 @@ boot().catch((e) => {
 });
 
 // per i test
-window.__sfoglia = { S, db, queue, sync };
+window.__pageturn = { S, db, queue, sync };

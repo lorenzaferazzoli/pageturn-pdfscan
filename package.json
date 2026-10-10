@@ -1,5 +1,5 @@
 {
-  "name": "sfoglia",
+  "name": "pageturn",
   "version": "1.0.0",
   "description": "Scanner di libri in PDF per iPhone e Android: web app offline, OCR, backup automatico, open source.",
   "scripts": {
@@ -24,6 +24,6 @@
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/lorenzaferazzoli/sfoglia"
+    "url": "https://github.com/lorenzaferazzoli/pageturn"
   }
 }

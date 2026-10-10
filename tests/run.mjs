@@ -51,8 +51,8 @@ try {
   await page.waitForSelector('.cam video');
   await page.waitForFunction(() => document.querySelector('#htext')?.textContent.includes('Tieni fermo') || document.querySelector('#htext')?.textContent.includes('rilevata'), null, { timeout: 15000 });
   await shot('02-fotocamera-rilevata');
-  await page.waitForFunction(() => (window.__sfoglia.S.project.order.length >= 2), null, { timeout: 30000 });
-  const n = await page.evaluate(() => window.__sfoglia.S.project.order.length);
+  await page.waitForFunction(() => (window.__pageturn.S.project.order.length >= 2), null, { timeout: 30000 });
+  const n = await page.evaluate(() => window.__pageturn.S.project.order.length);
   check(n >= 2, `scatto automatico con cambio pagina (${n} pagine)`);
   await shot('03-fotocamera-dopo-scatti');
   await page.click('.top [data-a="close"]');
@@ -67,7 +67,7 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.th img[src]').length >= 6, null, { timeout: 60000 });
   await page.waitForTimeout(400);
   const quad = await page.evaluate(() => {
-    const S = window.__sfoglia.S;
+    const S = window.__pageturn.S;
     return S.pages.get(S.project.order[2]).params.quad;
   });
   const exp = [[0.235, 0.215], [0.78, 0.185], [0.82, 0.86], [0.18, 0.815]];
@@ -102,14 +102,14 @@ try {
   await page.click('[data-c="ok"]');
   await page.click('[data-a="done"]');
   await page.waitForSelector('#grid');
-  const erased = await page.evaluate(() => { const S = window.__sfoglia.S; return S.pages.get(S.project.order[2]).params.erase.length; });
+  const erased = await page.evaluate(() => { const S = window.__pageturn.S; return S.pages.get(S.project.order[2]).params.erase.length; });
   check(erased === 1, 'tratto della gomma salvato');
 
   // dividi
   await page.click('.th >> nth=0');
   await page.waitForSelector('#pv[src]');
   await page.click('[data-a="split"]');
-  await page.waitForFunction(() => window.__sfoglia.S.project.order.length === 7);
+  await page.waitForFunction(() => window.__pageturn.S.project.order.length === 7);
   check(true, 'pagina divisa in due');
   await page.click('[data-a="done"]');
   await page.waitForSelector('#grid');
@@ -120,7 +120,7 @@ try {
   await shot('10-pagine-scuro');
 
   // esporta PDF con OCR
-  await page.waitForFunction(() => [...window.__sfoglia.S.pages.values()].every((p) => p.status === 'done'), null, { timeout: 60000 }).catch(() => {});
+  await page.waitForFunction(() => [...window.__pageturn.S.pages.values()].every((p) => p.status === 'done'), null, { timeout: 60000 }).catch(() => {});
   await page.click('[data-a="export"]');
   await page.waitForSelector('#go');
   await page.waitForTimeout(500);
@@ -150,7 +150,7 @@ try {
   check(/progetto\.json/.test(list) && (list.match(/originali\//g) || []).length === 6, 'backup con 6 foto originali (la pagina divisa ne condivide una)');
 
   // backup automatico sul server
-  await page.waitForFunction(() => window.__sfoglia.sync.getState().status === 'ok', null, { timeout: 30000 });
+  await page.waitForFunction(() => window.__pageturn.sync.getState().status === 'ok', null, { timeout: 30000 });
   const proj = readdirSync(dataDir).filter((d) => !d.startsWith('.'));
   const files = proj.length ? readdirSync(join(dataDir, proj[0], 'pages')) : [];
   check(files.filter((f) => f.endsWith('.jpg')).length === 7, `backup automatico: ${files.filter((f) => f.endsWith('.jpg')).length} foto sul server`);

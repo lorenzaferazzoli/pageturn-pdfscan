@@ -1,6 +1,6 @@
 {
-  "name": "Sfoglia — scanner di libri",
-  "short_name": "Sfoglia",
+  "name": "Pageturn — scanner di libri",
+  "short_name": "Pageturn",
   "description": "Scansiona libri in PDF dal telefono: offline, con OCR, open source.",
   "lang": "it",
   "start_url": "./",

@@ -1,5 +1,5 @@
 // Service worker: l'app funziona offline. Il motore OCR viene messo in cache al primo uso.
-const VERSION = 'sfoglia-1.0.0';
+const VERSION = 'pageturn-1.0.0';
 const SHELL = [
   './',
   'index.html',
@@ -25,7 +25,7 @@ const SHELL = [
   'icons/icon-512.png',
   'icons/apple-touch-icon.png',
 ];
-const OCR_CACHE = 'sfoglia-ocr-v1';
+const OCR_CACHE = 'pageturn-ocr-v1';
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)));

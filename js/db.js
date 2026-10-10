@@ -5,7 +5,7 @@
 // pages:    { id, projectId, created, rev, status: 'pending'|'done'|'error', params, width, height, sharp, ocr, synced }
 // blobs:    chiave `${pageId}:orig` | `:proc` | `:thumb` → Blob
 
-const DB_NAME = 'sfoglia';
+const DB_NAME = 'pageturn';
 let dbp = null;
 
 function open() {
