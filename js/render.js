@@ -128,9 +128,29 @@ async function dewarp(src, q, ow, oh, key) {
 
 // params: { quad, rotation, filter, brightness, contrast, erase, dewarp }
 // opts: { maxSide, quality, thumb }
+// Foto già decodificate, per le anteprime dell'editor: ogni ritocco non deve rileggere il JPEG intero.
+const bmpCache = new Map();
+async function getBitmap(blob, key) {
+  if (!key) return { bmp: await decode(blob), own: true };
+  const hit = bmpCache.get(key);
+  if (hit) {
+    bmpCache.delete(key);
+    bmpCache.set(key, hit);
+    return { bmp: hit, own: false };
+  }
+  const bmp = await decode(blob);
+  bmpCache.set(key, bmp);
+  while (bmpCache.size > 2) {
+    const [k0, v] = bmpCache.entries().next().value;
+    bmpCache.delete(k0);
+    release(v);
+  }
+  return { bmp, own: false };
+}
+
 export async function render(blob, params = {}, opts = {}) {
   const maxSide = opts.maxSide || 2400;
-  const bmp = await decode(blob);
+  const { bmp, own } = await getBitmap(blob, opts.cacheKey);
   try {
     const SW = bmp.width;
     const SH = bmp.height;
@@ -170,7 +190,7 @@ export async function render(blob, params = {}, opts = {}) {
     if (opts.thumb) res.thumb = await thumbOf(out, opts.thumb);
     return res;
   } finally {
-    release(bmp);
+    if (own) release(bmp);
   }
 }
 

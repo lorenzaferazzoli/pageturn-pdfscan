@@ -16,6 +16,7 @@ Scanner di libri in PDF che gira nel browser del telefono. Niente app store, nie
 - **Libro aperto:** trova la piega tra le due pagine. Con lo scatto singolo tiene la pagina intera e scarta il pezzo dell'altra; con *Doppia pagina* ogni scatto diventa due pagine, divise lungo la piega.
 - **Angoli precisi:** due metodi insieme, la zona di carta più chiara e le linee dritte dei bordi (trasformata di Hough); vince il quadrilatero con più bordi veri sotto i lati. Funziona anche su sfondi chiari e disordinati, e un dito su un angolo non lo sposta.
 - **Ritaglio preciso:** angoli e lati interi trascinabili, con una lente di ingrandimento.
+- **Vista libera** a schermo intero con zoom e trascinamento, sulla pagina a piena risoluzione o sulla foto originale: per controllare se una foto è sfocata.
 - **Dividi** con una linea che parte sulla piega trovata e si può spostare e inclinare.
 - **Annulla e ripeti** per tutte le modifiche della pagina, divisione compresa.
 - **Modifiche a tutte le pagine** (menu *Altro*, si attiva e disattiva): filtro, luminosità, contrasto e *Distendi* valgono per tutto il libro.

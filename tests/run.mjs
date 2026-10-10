@@ -145,6 +145,21 @@ try {
   await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.32, { steps: 30 });
   await page.mouse.up();
   const strokeMs = Date.now() - tStroke;
+  {
+    const geo = await page.evaluate(() => { const cv = document.querySelector('#cv'); return { bw: cv.width, bh: cv.height, cw: cv.clientWidth, ch: cv.clientHeight }; });
+    const okRatio = Math.abs(geo.bw / geo.cw - geo.bh / geo.ch) < 0.02;
+    // pixel dello schermo lungo il tratto e 30 px sotto: sopra deve essere bianco pieno
+    const png = await page.screenshot({ clip: { x: box.x, y: box.y, width: box.width, height: box.height } });
+    writeFileSync(join(out, '_stroke.png'), png);
+    const vals = execFileSync('python3', ['-c', `
+from PIL import Image
+im = Image.open('${join(out, '_stroke.png')}').convert('L'); W, H = im.size
+def avg(fy):
+    y = int(H * fy); xs = range(int(W * 0.42), int(W * 0.58))
+    return sum(im.getpixel((x, y)) for x in xs) / len(xs)
+print(avg(0.31), avg(0.31 + 40 / ${box.height}))`]).toString().trim().split(' ').map(Number);
+    check(okRatio && vals[0] > 250, `tratto della gomma sotto il dito (tela ${geo.bw}x${geo.bh} per ${geo.cw}x${geo.ch}, luminosità sul tratto ${Math.round(vals[0])})`);
+  }
   check(strokeMs < 1500, `tratto della gomma fluido (${strokeMs} ms per 30 movimenti)`);
   // un secondo tratto subito dopo, senza attendere
   await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5);
@@ -169,6 +184,40 @@ try {
   await page.click('[data-a="done"]');
   await page.waitForSelector('#grid');
   check(await page.evaluate(() => { const S = window.__pageturn.S; return S.pages.get(S.project.order[3]).params.dewarp === true; }), 'pagina distesa (UVDoc)');
+
+  // selezione: la griglia non si ridisegna (e non torna in alto)
+  await page.click('[data-a="select"]');
+  await page.waitForSelector('.th .check');
+  await page.evaluate(() => { document.querySelector('#grid').dataset.mark = 'x'; });
+  await page.click('.th >> nth=1');
+  await page.click('.th >> nth=2');
+  const sel = await page.evaluate(() => ({ mark: document.querySelector('#grid').dataset.mark, n: document.querySelectorAll('.th.sel').length, title: document.querySelector('.nav .title').textContent }));
+  check(sel.mark === 'x' && sel.n === 2 && /2 selezionate/.test(sel.title), `selezione senza ridisegnare la griglia (${sel.n}, «${sel.title}»)`);
+  await page.click('[data-a="done"]');
+
+  // vista libera a piena risoluzione
+  await page.click('.th >> nth=2');
+  await page.waitForSelector('#pv[src]');
+  await page.click('[data-a="zoom"]');
+  await page.waitForFunction(() => { const i = document.querySelector('.zoomview img'); return i && i.naturalWidth > 0 && document.querySelector('.zbusy').hidden; }, null, { timeout: 30000 });
+  const zw = await page.$eval('.zoomview img', (i) => i.naturalWidth);
+  const za = await page.locator('.zarea').boundingBox();
+  await page.mouse.dblclick(za.x + za.width / 2, za.y + za.height / 3);
+  await page.waitForTimeout(100);
+  const zp = await page.$eval('.zpct', (e) => e.textContent);
+  await shot('09d-zoom');
+  check(zw >= 600 && parseInt(zp, 10) >= 100, `vista libera: immagine ${zw} px, doppio tocco ${zp}`);
+  await page.click('[data-z="orig"]');
+  await page.waitForFunction(() => document.querySelector('.zbusy').hidden, null, { timeout: 30000 });
+  await page.click('[data-z="close"]');
+  // pagina successiva: l'immagine compare subito
+  const t0 = Date.now();
+  await page.click('[data-a="next"]');
+  await page.waitForFunction(() => { const pv = document.querySelector('#pv'); return pv && pv.complete && pv.naturalWidth > 0; }, null, { timeout: 10000 });
+  const tNext = Date.now() - t0;
+  check(tNext < 800, `pagina successiva mostrata in ${tNext} ms`);
+  await page.click('[data-a="done"]');
+  await page.waitForSelector('#grid');
 
   // annulla / ripeti
   await page.click('.th >> nth=2');

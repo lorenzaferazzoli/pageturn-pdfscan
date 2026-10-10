@@ -30,7 +30,37 @@ function startWorker(lane) {
   }
 }
 
+// Lavori in primo piano in corso: la coda in background aspetta che finiscano.
+let fgActive = 0;
+let idleWaiters = [];
+function fgDone() {
+  fgActive = Math.max(0, fgActive - 1);
+  if (fgActive) return;
+  setTimeout(() => {
+    if (fgActive) return;
+    const w = idleWaiters;
+    idleWaiters = [];
+    w.forEach((f) => f());
+  }, 250);
+}
+export function fgIdle() {
+  if (!fgActive) return Promise.resolve();
+  return new Promise((r) => idleWaiters.push(r));
+}
+
 async function call(lane, op, ...args) {
+  if (lane === 'fg') {
+    fgActive++;
+    try {
+      return await callLane(lane, op, ...args);
+    } finally {
+      fgDone();
+    }
+  }
+  return callLane(lane, op, ...args);
+}
+
+async function callLane(lane, op, ...args) {
   if (!lanes[lane] && fallback === null) lanes[lane] = startWorker(lane);
   const worker = lanes[lane];
   if (!worker) {

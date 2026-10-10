@@ -7,7 +7,7 @@ import { renderPage, detectPage } from './jobs.js';
 import { splitQuad, FULL_QUAD, homography } from './proc.js';
 import { ENGINES as OCR_ENGINES } from './ocr.js';
 
-export const VERSION = '1.4.3';
+export const VERSION = '1.5.0';
 export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------
@@ -152,16 +152,51 @@ async function applyTheme(t) {
 }
 
 // ---------- miniature ----------
-const thumbs = new Map(); // pageId → { url, rev }
-async function thumbURL(page) {
+// Cache delle miniature per pagina. Una pagina in rielaborazione continua a mostrare la miniatura
+// precedente (con un piccolo indicatore) invece di uno spazio vuoto.
+const thumbs = new Map(); // pageId → { url, rev, done }
+function thumbValid(page, c) {
+  if (!c) return false;
+  if (page.status !== 'done') return true; // in elaborazione: va bene anche quella vecchia
+  return c.done && c.rev === page.rev;
+}
+let thumbBatch = null;
+function thumbURL(page) {
   const c = thumbs.get(page.id);
-  if (c && c.rev === page.rev && c.status === page.status) return c.url;
-  const b = await db.getBlob(`${page.id}:thumb`);
-  if (c) URL.revokeObjectURL(c.url);
-  if (!b) { thumbs.delete(page.id); return null; }
-  const url = URL.createObjectURL(b);
-  thumbs.set(page.id, { url, rev: page.rev, status: page.status });
-  return url;
+  if (thumbValid(page, c)) return Promise.resolve(c.url);
+  // le richieste dello stesso momento si leggono in un'unica transazione
+  if (!thumbBatch) {
+    const batch = { pages: new Map(), waiters: new Map() };
+    thumbBatch = batch;
+    setTimeout(async () => {
+      thumbBatch = null;
+      const list = [...batch.pages.values()];
+      let blobs = [];
+      try { blobs = await db.getBlobs(list.map((p) => `${p.id}:thumb`)); } catch { /* */ }
+      list.forEach((p, i) => {
+        const old = thumbs.get(p.id);
+        let url = null;
+        if (blobs[i]) {
+          if (old) URL.revokeObjectURL(old.url);
+          url = URL.createObjectURL(blobs[i]);
+          thumbs.set(p.id, { url, rev: p.rev, done: p.status === 'done' });
+        } else if (old) url = old.url;
+        for (const w of batch.waiters.get(p.id) || []) w(url);
+      });
+      // limite di memoria: le più vecchie si liberano
+      while (thumbs.size > 1500) {
+        const [k, v] = thumbs.entries().next().value;
+        URL.revokeObjectURL(v.url);
+        thumbs.delete(k);
+      }
+    }, 0);
+  }
+  thumbBatch.pages.set(page.id, page);
+  return new Promise((res) => {
+    const ws = thumbBatch.waiters.get(page.id) || [];
+    ws.push(res);
+    thumbBatch.waiters.set(page.id, ws);
+  });
 }
 function dropThumbs() {
   for (const c of thumbs.values()) URL.revokeObjectURL(c.url);
@@ -214,7 +249,7 @@ function show(html, cls = '') {
 }
 
 async function loadProject(id) {
-  if (!S.project || S.project.id !== id) editHistory.clear();
+  if (!S.project || S.project.id !== id) { editHistory.clear(); S.gridScroll = 0; }
   S.project = await db.getProject(id);
   S.pages = await db.getPages(id);
   return S.project;
@@ -296,7 +331,6 @@ function storageError(e) {
 async function home() {
   S.view = 'home';
   S.project = null;
-  dropThumbs();
   const projects = await db.listProjects();
   const hideBanner = await db.kvGet('hideInstall', false);
   const el = show(`
@@ -408,8 +442,13 @@ function isBlurry(p, med) {
 function thumbHTML(p, i, med) {
   const warn = p.status === 'error' || isBlurry(p, med);
   const sel = S.selected.has(p.id);
+  // una pagina già elaborata almeno una volta ha una miniatura: si mostra anche mentre si rielabora
+  const hasThumb = p.status === 'done' || p.width || thumbs.has(p.id);
+  const c = thumbs.get(p.id);
+  const img = c && thumbValid(p, c) ? `<img alt="" src="${c.url}" data-id="${p.id}">` : `<img alt="" data-src="${p.id}">`;
   return `<button class="th ${warn ? 'warn' : ''} ${sel ? 'sel' : ''}" data-id="${p.id}">
-    <div class="img">${p.status === 'done' ? `<img alt="" data-src="${p.id}">` : p.status === 'error' ? icon('alert-triangle') : icon('loader-2', 'spinner spin')}</div>
+    <div class="img">${p.status === 'error' ? icon('alert-triangle') : hasThumb ? img : icon('loader-2', 'spinner spin')}</div>
+    ${p.status === 'pending' && hasThumb ? `<span class="pend">${icon('loader-2', 'spinner')}</span>` : ''}
     ${warn ? '<span class="badge">!</span>' : ''}
     ${S.select ? `<span class="check">${sel ? icon('check') : ''}</span>` : ''}
     <div class="n">${i + 1}${p.status === 'error' ? ' · errore' : warn ? ' · sfocata' : ''}</div></button>`;
@@ -456,6 +495,7 @@ async function project() {
            <button class="tool" data-a="sdewarp">${icon('wave-sine')}Distendi</button>
            <button class="tool danger" data-a="sdelete">${icon('trash')}Elimina</button></div>`
         : `<div class="modehint" style="padding-bottom:calc(env(safe-area-inset-bottom) + 16px)">Tieni premuta una pagina e trascinala nella nuova posizione</div>`;
+  const prevScroll = S.gridScroll || 0;
   const el = show(`
     <div class="nav">${nav}</div>
     <div class="scroll">
@@ -465,6 +505,10 @@ async function project() {
         : `<div class="empty"><div class="big">${icon('camera')}</div><h2>Nessuna pagina</h2><p>Tocca Scansiona per iniziare, oppure importa foto dal rullino.</p></div>`}
     </div>
     ${bottom}`);
+
+  const scroller = $('.scroll', el);
+  scroller.scrollTop = prevScroll;
+  scroller.addEventListener('scroll', () => { S.gridScroll = scroller.scrollTop; }, { passive: true });
 
   // caricamento pigro delle miniature
   if (io) io.disconnect();
@@ -511,7 +555,7 @@ async function project() {
       const id = t.dataset.id;
       if (S.select) {
         S.selected.has(id) ? S.selected.delete(id) : S.selected.add(id);
-        return project();
+        return updateSelection(el, pages);
       }
       return editor(id);
     }
@@ -524,7 +568,7 @@ async function project() {
     else if (a === 'all') {
       if (S.selected.size === pages.length) S.selected.clear();
       else pages.forEach((p) => S.selected.add(p.id));
-      project();
+      updateSelection(el, pages);
     } else if (a === 'menu') {
       menuSheet(P.name, [
         { label: 'Riordina pagine', icon: 'arrows-move', run: () => { S.reorder = true; project(); } },
@@ -582,6 +626,20 @@ async function project() {
       }
     }
   };
+}
+
+// Selezione aggiornata sul posto: niente ridisegno della griglia, la posizione resta quella.
+function updateSelection(el, pages) {
+  for (const th of $$('.th', el)) {
+    const on = S.selected.has(th.dataset.id);
+    th.classList.toggle('sel', on);
+    const ck = $('.check', th);
+    if (ck) ck.innerHTML = on ? icon('check') : '';
+  }
+  const t = $('.nav .title', el);
+  if (t) t.textContent = S.selected.size ? plural(S.selected.size, 'selezionata', 'selezionate') : 'Seleziona pagine';
+  const all = $('[data-a="all"]', el);
+  if (all) all.textContent = S.selected.size === pages.length && pages.length ? 'Nessuna' : 'Tutte';
 }
 
 const FILTER_LIST = [['original', 'Originale'], ['whiten', 'Sbianca'], ['gray', 'Grigi'], ['bw', 'B/N']];
@@ -915,6 +973,198 @@ function origToPreview(quad, k, pt) {
   return rotPt([(A * x + D * y + G) / z, (B * x + E * y + Hh) / z], k);
 }
 
+// ---------- vista libera: schermo intero con zoom e trascinamento ----------
+// load(kind) restituisce il blob da mostrare: 'page' (pagina elaborata, piena risoluzione) o 'orig' (foto).
+function openZoom(load) {
+  const wrap = document.createElement('div');
+  wrap.className = 'zoomview';
+  wrap.innerHTML = `<div class="ztop">
+      <button class="circle glass" data-z="close" aria-label="Chiudi">${icon('x')}</button>
+      <div class="seg zseg"><button data-z="page" class="on">Pagina</button><button data-z="orig">Foto originale</button></div>
+      <span class="zpct"></span></div>
+    <div class="zarea"><img alt="" draggable="false"><span class="zbusy">${icon('loader-2', 'spinner')}</span></div>
+    <div class="zhint">Pizzica o doppio tocco per ingrandire, trascina per spostarti</div>`;
+  document.body.append(wrap);
+  const area = $('.zarea', wrap);
+  const img = $('img', wrap);
+  const busy = $('.zbusy', wrap);
+  const pct = $('.zpct', wrap);
+  let url = null;
+  let nw = 0;
+  let nh = 0;
+  let s = 1;
+  let tx = 0;
+  let ty = 0;
+  let fit = 1;
+  let kind = 'page';
+  let loadTok = 0;
+
+  const AW = () => area.clientWidth;
+  const AH = () => area.clientHeight;
+  function clamp() {
+    const w = nw * s;
+    const h = nh * s;
+    tx = w <= AW() ? (AW() - w) / 2 : Math.min(0, Math.max(AW() - w, tx));
+    ty = h <= AH() ? (AH() - h) / 2 : Math.min(0, Math.max(AH() - h, ty));
+  }
+  function apply() {
+    clamp();
+    img.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
+    pct.textContent = nw ? `${Math.round(s * 100)}%` : '';
+  }
+  function toFit() {
+    fit = Math.min(AW() / nw, AH() / nh);
+    s = fit;
+    apply();
+  }
+  // zoom attorno a un punto dello schermo (cx, cy relativi all'area)
+  function zoomAt(ns, cx, cy) {
+    ns = Math.min(Math.max(ns, fit * 0.9), Math.max(4, fit * 2));
+    const ix = (cx - tx) / s;
+    const iy = (cy - ty) / s;
+    s = ns;
+    tx = cx - ix * s;
+    ty = cy - iy * s;
+    apply();
+  }
+
+  async function show(k) {
+    kind = k;
+    $$('.zseg button', wrap).forEach((b) => b.classList.toggle('on', b.dataset.z === k));
+    const my = ++loadTok;
+    busy.hidden = false;
+    try {
+      const blob = await load(k);
+      if (my !== loadTok || !wrap.isConnected) return;
+      const u = URL.createObjectURL(blob);
+      const im = new Image();
+      im.src = u;
+      await im.decode().catch(() => {});
+      if (my !== loadTok || !wrap.isConnected) { URL.revokeObjectURL(u); return; }
+      // stesso punto relativo quando si passa da pagina a foto
+      const keep = nw && s > fit * 1.05 ? { fx: (AW() / 2 - tx) / (nw * s), fy: (AH() / 2 - ty) / (nh * s), rel: s / fit } : null;
+      if (url) URL.revokeObjectURL(url);
+      url = u;
+      img.src = u;
+      nw = im.naturalWidth;
+      nh = im.naturalHeight;
+      img.style.width = `${nw}px`;
+      img.style.height = `${nh}px`;
+      toFit();
+      if (keep) {
+        s = fit * keep.rel;
+        tx = AW() / 2 - keep.fx * nw * s;
+        ty = AH() / 2 - keep.fy * nh * s;
+        apply();
+      }
+    } catch (e) {
+      toast(`Immagine non disponibile: ${e.message}`);
+    } finally {
+      if (my === loadTok) busy.hidden = true;
+    }
+  }
+
+  // gesti: un dito trascina, due dita pizzicano, doppio tocco alterna adatta / 100%
+  const pts = new Map();
+  let g = null;
+  let lastTap = null;
+  const local = (e) => { const b = area.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
+  function startGesture() {
+    const v = [...pts.values()];
+    if (v.length >= 2) {
+      const [a, b] = v;
+      g = { pinch: true, d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, m: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], s, tx, ty };
+    } else if (v.length === 1) {
+      g = { pinch: false, p: v[0], tx, ty, moved: false };
+    } else g = null;
+  }
+  area.addEventListener('pointerdown', (e) => {
+    area.setPointerCapture(e.pointerId);
+    pts.set(e.pointerId, local(e));
+    startGesture();
+  });
+  area.addEventListener('pointermove', (e) => {
+    if (!pts.has(e.pointerId) || !g) return;
+    pts.set(e.pointerId, local(e));
+    const v = [...pts.values()];
+    if (g.pinch && v.length >= 2) {
+      const [a, b] = v;
+      const d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+      const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      const ns = Math.min(Math.max(g.s * (d / g.d), fit * 0.9), Math.max(4, fit * 2));
+      const ix = (g.m[0] - g.tx) / g.s;
+      const iy = (g.m[1] - g.ty) / g.s;
+      s = ns;
+      tx = m[0] - ix * s;
+      ty = m[1] - iy * s;
+      apply();
+    } else if (!g.pinch) {
+      const p = v[0];
+      if (Math.hypot(p[0] - g.p[0], p[1] - g.p[1]) > 6) g.moved = true;
+      tx = g.tx + p[0] - g.p[0];
+      ty = g.ty + p[1] - g.p[1];
+      apply();
+    }
+  });
+  const end = (e) => {
+    if (!pts.has(e.pointerId)) return;
+    const p = local(e);
+    const wasTap = g && !g.pinch && !g.moved && pts.size === 1;
+    pts.delete(e.pointerId);
+    startGesture();
+    if (!wasTap) { lastTap = null; return; }
+    const now = Date.now();
+    if (lastTap && now - lastTap.t < 320 && Math.hypot(p[0] - lastTap.p[0], p[1] - lastTap.p[1]) < 30) {
+      lastTap = null;
+      if (s > fit * 1.05) toFit();
+      else zoomAt(Math.max(1, fit * 2.5), p[0], p[1]); // 100%: un pixel dell'immagine per punto dello schermo
+    } else lastTap = { t: now, p };
+  };
+  area.addEventListener('pointerup', end);
+  area.addEventListener('pointercancel', end);
+  area.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const [cx, cy] = local(e);
+    zoomAt(s * Math.exp(-e.deltaY / 300), cx, cy);
+  }, { passive: false });
+  const ro = new ResizeObserver(() => { if (nw) { const was = s <= fit * 1.01; fit = Math.min(AW() / nw, AH() / nh); if (was) s = fit; apply(); } });
+  ro.observe(area);
+
+  function close() {
+    loadTok++;
+    ro.disconnect();
+    if (url) URL.revokeObjectURL(url);
+    wrap.remove();
+  }
+  wrap.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-z]');
+    if (!t) return;
+    if (t.dataset.z === 'close') close();
+    else if (t.dataset.z !== kind) show(t.dataset.z);
+  });
+  show('page');
+}
+
+// Pagine elaborate già lette (la corrente e le vicine): passare da una pagina all'altra è immediato.
+const procCache = new Map(); // pageId → { rev, blob }
+async function procBlob(page) {
+  const c = procCache.get(page.id);
+  if (c && c.rev === page.rev) return c.blob;
+  const blob = await db.getBlob(`${page.id}:proc`);
+  if (blob) {
+    procCache.set(page.id, { rev: page.rev, blob });
+    while (procCache.size > 5) procCache.delete(procCache.keys().next().value);
+  }
+  return blob;
+}
+function prefetchNeighbors(P, idx) {
+  for (const j of [idx + 1, idx - 1]) {
+    const id = P.order[j];
+    const p = id && S.pages.get(id);
+    if (p && p.status === 'done') procBlob(p).then((b) => { if (b) { const im = new Image(); im.src = URL.createObjectURL(b); im.decode().catch(() => {}).finally(() => URL.revokeObjectURL(im.src)); } });
+  }
+}
+
 async function editor(pageId) {
   S.view = 'editor';
   const P = S.project;
@@ -922,7 +1172,9 @@ async function editor(pageId) {
   if (!page) return project();
   const idx = P.order.indexOf(pageId);
   const params = structuredClone(page.params);
-  const orig = await db.getBlob(db.origKey(page));
+  let orig = null;
+  const origP = db.getBlob(db.origKey(page)).then((b) => (orig = b));
+  const cacheKey = `${db.origKey(page)}`;
   let mode = 'view';
   let dirty = false;
   let pvURL = null;
@@ -944,7 +1196,8 @@ async function editor(pageId) {
       <div class="side r"><button class="link" data-a="done">Fatto</button></div>
     </div>
     <div class="stage" id="stage"><img id="pv" alt=""><svg id="ov"></svg><canvas id="cv"></canvas><canvas id="loupe" class="loupe" hidden></canvas><span class="busy" id="busy" hidden>${icon('loader-2', 'spinner')}</span>
-      <div class="histbtns"><button class="circle glass" data-a="undo" aria-label="Annulla">${icon('arrow-back-up')}</button><button class="circle glass" data-a="redoh" aria-label="Ripeti">${icon('arrow-forward-up')}</button></div></div>
+      <div class="histbtns"><button class="circle glass" data-a="undo" aria-label="Annulla">${icon('arrow-back-up')}</button><button class="circle glass" data-a="redoh" aria-label="Ripeti">${icon('arrow-forward-up')}</button></div>
+      <button class="circle glass zoombtn" data-a="zoom" aria-label="Schermo intero con zoom">${icon('arrows-maximize')}</button></div>
     <div id="controls"></div>`);
   const stage = $('#stage', el);
   const pv = $('#pv', el);
@@ -952,9 +1205,29 @@ async function editor(pageId) {
   const cv = $('#cv', el);
   const controls = $('#controls', el);
 
-  // immagine iniziale: la versione già elaborata, se c'è
-  const proc = page.status === 'done' ? await db.getBlob(`${page.id}:proc`) : null;
-  if (proc) { pvURL = URL.createObjectURL(proc); pv.src = pvURL; } else preview();
+  // Immagine iniziale: subito la miniatura (già in memoria), poi la pagina elaborata. Se la pagina
+  // è in rielaborazione si mostra intanto la versione precedente e si calcola l'anteprima.
+  const th0 = thumbs.get(page.id);
+  if (th0) pv.src = th0.url;
+  $('#busy', el).hidden = false;
+  showProc().then((ok) => {
+    if (!ok || page.status !== 'done') preview();
+    else $('#busy', el).hidden = true;
+    prefetchNeighbors(P, idx);
+  });
+
+  async function showProc() {
+    const blob = await procBlob(page);
+    if (!blob || S.view !== 'editor' || token) return false;
+    const u = URL.createObjectURL(blob);
+    const im = new Image();
+    im.src = u;
+    try { await im.decode(); } catch { /* */ }
+    if (token) { URL.revokeObjectURL(u); return false; } // nel frattempo è partita un'anteprima
+    pv.src = u;
+    pvURL = u;
+    return true;
+  }
 
   function setPreview(blob) {
     const u = URL.createObjectURL(blob);
@@ -972,7 +1245,8 @@ async function editor(pageId) {
       const my = ++token;
       $('#busy', el).hidden = false;
       try {
-        const r = await renderPage(orig, params, { maxSide: 1200, quality: 0.86 });
+        await origP;
+        const r = await renderPage(orig, params, { maxSide: 1200, quality: 0.86, cacheKey });
         if (my !== token || mode === 'crop') return;
         pw = r.width;
         ph = r.height;
@@ -1101,6 +1375,7 @@ async function editor(pageId) {
     token++;
     $('#busy', el).hidden = true;
     quad = structuredClone(params.quad || FULL_QUAD);
+    await origP;
     if (!origURL) origURL = URL.createObjectURL(orig);
     pv.src = origURL;
     await pv.decode().catch(() => {});
@@ -1117,6 +1392,7 @@ async function editor(pageId) {
       if (!c) return;
       const k = c.dataset.c;
       if (k === 'detect') {
+        await origP;
         const r = await detectPage(orig);
         if (r.found) { quad = r.found.quad; drawCrop(); } else toast('Bordi non trovati: sistemali a mano');
       } else if (k === 'full') { quad = structuredClone(FULL_QUAD); drawCrop(); }
@@ -1172,6 +1448,7 @@ async function editor(pageId) {
       if (best >= 0) { stage.setPointerCapture(e.pointerId); drawLoupe(quad[best]); }
       else if (edgeDrag) stage.setPointerCapture(e.pointerId);
     } else if (mode === 'erase') {
+      if (e.target.closest('button')) return;
       eraseStart(e);
     }
   });
@@ -1264,15 +1541,21 @@ async function editor(pageId) {
   let eraseBase = 0; // tratti già presenti nell'anteprima quando si è aperta la gomma
   let eraseCtx = null;
   let paper = 'rgb(255,255,255)';
+  // La tela dei tratti deve avere esattamente le misure dell'area mostrata: va dimensionata dopo
+  // aver cambiato i controlli (l'area dell'immagine cambia altezza) e ogni volta che si ridimensiona.
+  function fitCanvas() {
+    if (!eraseCtx) return;
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    cv.width = Math.round(stage.clientWidth * dpr);
+    cv.height = Math.round(stage.clientHeight * dpr);
+    eraseCtx.setTransform(cv.width / stage.clientWidth, 0, 0, cv.height / stage.clientHeight, 0, 0);
+    eraseCtx.lineCap = eraseCtx.lineJoin = 'round';
+    redrawStrokes();
+  }
   function panelErase() {
     mode = 'erase';
     ov.innerHTML = '';
-    const dpr = Math.min(2, devicePixelRatio || 1); // basta per un tratto, ed è molto più leggero
-    cv.width = Math.round(stage.clientWidth * dpr);
-    cv.height = Math.round(stage.clientHeight * dpr);
     eraseCtx = cv.getContext('2d');
-    eraseCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    eraseCtx.lineCap = eraseCtx.lineJoin = 'round';
     params.erase = params.erase || [];
     eraseBase = params.erase.length;
     paper = paperColor();
@@ -1281,6 +1564,7 @@ async function editor(pageId) {
       <div class="panel"><div class="sliders"><label class="slider"><span>Pennello</span>
         <input type="range" min="1" max="10" step="0.5" value="${brush}" id="brush" style="--p:${((brush - 1) / 9) * 100}%"><span class="v"></span></label></div></div>
       <div class="bar"><button class="btn" data-c="undo">${icon('arrow-back-up')} Annulla tratto</button><button class="btn primary" data-c="ok">Fine</button></div>`;
+    fitCanvas();
     const b = $('#brush', controls);
     b.oninput = () => { brush = +b.value; b.style.setProperty('--p', `${((brush - 1) / 9) * 100}%`); };
     controls.onclick = (e) => {
@@ -1459,7 +1743,15 @@ async function editor(pageId) {
     await db.putProject(Object.assign((await db.getProject(P.id)) || P, { filter: params.filter }));
   }
 
+  const ro = new ResizeObserver(() => {
+    if (mode === 'crop') drawCrop();
+    else if (mode === 'split') drawSplit();
+    else if (mode === 'erase') fitCanvas();
+  });
+  ro.observe(stage);
+
   S.cleanup = () => {
+    ro.disconnect();
     clearTimeout(pvTimer);
     token++;
     if (pvURL) URL.revokeObjectURL(pvURL);
@@ -1480,7 +1772,19 @@ async function editor(pageId) {
       if (P.order[j]) editor(P.order[j]);
     } else if (a === 'crop') panelCrop();
     else if (a === 'erase') panelErase();
-    else if (a === 'undo') stepHistory(H0.undo, H0.redo);
+    else if (a === 'zoom') {
+      openZoom(async (kind) => {
+        await origP;
+        if (kind === 'orig') return orig;
+        const fresh = S.pages.get(page.id) || page;
+        if (!dirty && fresh.status === 'done' && fresh.rev === page.rev) {
+          const b = await procBlob(fresh);
+          if (b) return b;
+        }
+        // modifiche non ancora salvate: la pagina a piena risoluzione si calcola adesso
+        return (await renderPage(orig, params, { maxSide: 2400, quality: 0.92, cacheKey })).blob;
+      });
+    } else if (a === 'undo') stepHistory(H0.undo, H0.redo);
     else if (a === 'redoh') stepHistory(H0.redo, H0.undo);
     else if (a === 'rotate') {
       mark();
@@ -1558,6 +1862,7 @@ async function editor(pageId) {
     };
     // posizione iniziale: la piega trovata nella foto, se cade dentro questa pagina
     try {
+      await origP;
       const r = await detectPage(orig);
       const sp = r.found && r.found.spine;
       if (sp && mode === 'split') {

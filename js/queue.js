@@ -1,6 +1,6 @@
 // Coda di elaborazione: una pagina alla volta, in background, ripresa all'avvio.
 import * as db from './db.js';
-import { renderPage } from './jobs.js';
+import { renderPage, fgIdle } from './jobs.js';
 
 export const PROC = { maxSide: 2400, quality: 0.88, thumb: 360 };
 
@@ -42,6 +42,7 @@ async function pump() {
 }
 
 async function processOne(id, attempt = 0) {
+  await fgIdle(); // prima ciò che si sta guardando
   const page = await db.getPage(id);
   if (!page) return;
   const orig = await db.getBlob(db.origKey(page));

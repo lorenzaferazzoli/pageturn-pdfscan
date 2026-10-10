@@ -96,6 +96,13 @@ export async function getBlob(key) {
   return req(db.transaction('blobs').objectStore('blobs').get(key));
 }
 
+// Più blob in un'unica transazione (miniature della griglia).
+export async function getBlobs(keys) {
+  const db = await open();
+  const st = db.transaction('blobs').objectStore('blobs');
+  return Promise.all(keys.map((k) => req(st.get(k))));
+}
+
 export async function putBlobs(entries) {
   const db = await open();
   const tx = db.transaction('blobs', 'readwrite');
