@@ -1,5 +1,5 @@
 // Service worker: l'app funziona offline. Il motore OCR viene messo in cache al primo uso.
-const VERSION = 'pageturn-1.6.0';
+const VERSION = 'pageturn-1.7.0';
 const SHELL = [
   './',
   'index.html',
@@ -17,6 +17,7 @@ const SHELL = [
   'js/proc-worker.js',
   'js/icons.js',
   'js/i18n.js',
+  'js/dewarp.js',
   'js/export.js',
   'js/ocr.js',
   'js/paddle.js',
@@ -37,6 +38,8 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== OCR_CACHE).map((k) => caches.delete(k))))
+      // il vecchio modello di Distendi (sostituito da uvdoc-grid.onnx)
+      .then(() => caches.open(OCR_CACHE)).then((c) => c.delete(new URL('vendor/paddle/uvdoc.onnx', self.registration.scope).href))
       .then(() => self.clients.claim()),
   );
 });

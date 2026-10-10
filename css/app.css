@@ -239,6 +239,7 @@ input[type='range']::-moz-range-thumb { width: 22px; height: 22px; border-radius
 /* ---------- fogli dal basso ---------- */
 .sheetwrap { position: fixed; inset: 0; z-index: 40; background: var(--sheet-backdrop); display: flex; align-items: flex-end; justify-content: center; animation: fade 0.18s ease-out; }
 .sheet { width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto; background: var(--bg); border-radius: 16px 16px 0 0; padding: 8px 16px calc(env(safe-area-inset-bottom) + 18px); animation: up 0.24s cubic-bezier(0.2, 0.9, 0.3, 1); }
+.sheet.still { animation: none; }
 .sheet .grab { width: 36px; height: 5px; border-radius: 3px; background: var(--sep); margin: 0 auto 10px; }
 .sheet .shead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .sheet h2 { font-size: 19px; margin: 0; font-weight: 700; }

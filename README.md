@@ -1,6 +1,6 @@
 # Pageturn
 
-*Italiano · [English](README.en.md)*
+*Italiano · [English](README.en.md) · [中文](README.zh.md)*
 
 Scanner di libri in PDF che gira nel browser del telefono. Niente app store, niente account, niente cloud di terzi: è una web app che si installa sulla schermata Home, funziona offline ed è open source.
 
@@ -24,9 +24,9 @@ Scanner di libri in PDF che gira nel browser del telefono. Niente app store, nie
 - **Annulla e ripeti** per tutte le modifiche della pagina, divisione compresa.
 - **Modifiche a tutte le pagine** (menu *Altro*, si attiva e disattiva): filtro, luminosità, contrasto, nitidezza e *Distendi* valgono per tutto il libro.
 - **PDF in formato A4** con 1 cm di margine, oppure con le pagine della misura della foto.
-- **Gomma** per macchie, segni a matita e dita sul bordo: il tratto compare subito sotto il dito e il risultato vero arriva un istante dopo, con una lente che mostra cosa stai cancellando.
+- **Gomma** per macchie, segni a matita e dita sul bordo: il tratto compare subito sotto il dito e il risultato vero arriva un istante dopo, con una lente che mostra cosa stai cancellando. I tratti restano al loro posto anche se poi accendi o spegni *Distendi*.
 - **Avviso sulle foto mosse**, rotazione, riordino trascinando, riscatto di una singola pagina.
-- **Pagine curve:** lo strumento *Distendi* raddrizza le righe piegate vicino alla rilegatura (modello UVDoc), su una pagina o su tutte quelle selezionate.
+- **Pagine curve:** lo strumento *Distendi* raddrizza le righe piegate vicino alla rilegatura, su una pagina o su tutte quelle selezionate. Il modello UVDoc stima la forma della pagina, l'app la trasforma in una superficie liscia (un foglio piegato verso la rilegatura, senza onde) e poi segue le righe di testo per raddrizzare quello che resta. La pagina si ricampiona dalla foto a piena risoluzione.
 - **OCR sul telefono** con due motori: *Preciso* (PaddleOCR PP-OCRv5, italiano, inglese e le altre lingue latine) e *Veloce* (Tesseract). Il PDF ha il testo ricercabile e selezionabile.
 - **Esportazione** in PDF (tre livelli di qualità) o in immagini JPEG, con salvataggio diretto su File, iCloud Drive, Google Drive o Dropbox dal menu Condividi.
 - **Leggera e veloce.** L'elaborazione gira in background: nelle prove 120 pagine vengono elaborate senza bloccare l'interfaccia.
@@ -91,7 +91,7 @@ Le foto restano sul telefono e, se lo configuri, sul tuo server. L'OCR avviene s
 
 ## Limiti noti
 
-- *Distendi* lavora sulla foto attorno alla pagina e lascia intatte le pagine già piatte; con pieghe molto forti può deformare i bordi. Si vede subito nell'anteprima, si può disattivare e annullare.
+- *Distendi* lavora sulla foto attorno alla pagina e lascia intatte le pagine già piatte; con pieghe molto forti può deformare i bordi, e proprio a ridosso della rilegatura le lettere possono restare un po' più strette. Si vede subito nell'anteprima, si può disattivare e annullare.
 - Il riconoscimento della pagina funziona meglio con la carta su uno sfondo più scuro. Su sfondi chiari usa le linee dei bordi, ma se la pagina accanto è chiara quanto quella da scansionare conviene sistemare gli angoli a mano (con la lente).
 - Con la fotocamera dentro l'app la risoluzione è quella del video (fino a 4K, dipende dal telefono). Per le pagine con caratteri minuti c'è la fotocamera di iOS a piena risoluzione.
 - L'OCR legge solo le lingue con alfabeto latino: il testo cinese per ora non viene riconosciuto.
@@ -121,15 +121,17 @@ npm start                    # http://localhost:8080
 npm test                     # prova completa in Chromium con una finta fotocamera
 node tests/stress.mjs 120    # prova di carico
 node tests/stabilizer.mjs    # stabilizzazione: ogni scatto deve risultare nitido
+node tests/dewarp-check.mjs  # Distendi: quanto restano storte le righe sulle pagine curve di prova
 node tests/i18n.mjs          # traduzioni: niente italiano nelle schermate in inglese e cinese
 node tests/detect-check.mjs  # disegna il riconoscimento delle pagine su tests/out/
+python3 tests/make-curved.py # rigenera le pagine curve di prova
 npm run vendor               # dopo aver aggiornato le librerie
 sh scripts/paddle-models.sh  # per riscaricare i modelli PaddleOCR
 ```
 
 | Cartella | Contenuto |
 |---|---|
-| `js/` | app (`app.js`), traduzioni (`i18n.js`), archivio (`db.js`), fotocamera, scatto automatico e stabilizzazione (`camera.js`, `detect.js`), elaborazione immagini (`proc.js`, `render.js`, nel worker), coda (`queue.js`), OCR (`ocr.js`, `paddle.js`, `paddle-worker.js`), PDF e backup (`export.js`), backup sul server (`sync.js`) |
+| `js/` | app (`app.js`), traduzioni (`i18n.js`), archivio (`db.js`), fotocamera, scatto automatico e stabilizzazione (`camera.js`, `detect.js`), elaborazione immagini (`proc.js`, `render.js`, nel worker), pagine curve (`dewarp.js`), coda (`queue.js`), OCR (`ocr.js`, `paddle.js`, `paddle-worker.js`), PDF e backup (`export.js`), backup sul server (`sync.js`) |
 | `server/` | server Node senza dipendenze |
 | `vendor/` | librerie incluse (vedi [THIRD-PARTY.md](THIRD-PARTY.md)) |
 | `tests/` | prove automatiche e immagini di prova |

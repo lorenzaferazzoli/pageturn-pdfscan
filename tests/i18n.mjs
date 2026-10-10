@@ -147,8 +147,16 @@ async function run(locale, lang, bookName) {
   await page.click('.sheet [data-close]');
   await page.click('[data-a="back"]');
   await page.click('[data-a="settings"]');
+  await page.waitForTimeout(400);
+  // il foglio resta aperto e si traduce sul posto: niente chiusura, niente nuova animazione
+  await page.evaluate(() => {
+    window.__swaps = { removed: 0 };
+    new MutationObserver((ms) => ms.forEach((m) => m.removedNodes.forEach((n) => { if (n.classList?.contains('sheetwrap')) window.__swaps.removed++; }))).observe(document.body, { childList: true });
+  });
   await page.click('#lang [data-l="it"]');
-  await page.waitForSelector('text=Impostazioni');
+  await page.waitForSelector('.sheet h2:text("Impostazioni")');
+  const sw = await page.evaluate(() => ({ removed: window.__swaps.removed, wraps: document.querySelectorAll('.sheetwrap').length, anim: getComputedStyle(document.querySelector('.sheet')).animationName, home: document.querySelector('#app').textContent.includes('Nuovo libro') }));
+  check(sw.removed === 0 && sw.wraps === 1 && sw.anim === 'none' && sw.home, `${lang}: cambio di lingua senza chiudere il foglio (${JSON.stringify(sw)})`);
   await page.reload();
   await page.waitForSelector('[data-a="new"]');
   const it = await page.textContent('#app');

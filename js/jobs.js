@@ -76,6 +76,9 @@ async function callLane(lane, op, ...args) {
 
 // opts.lane: 'bg' per la coda; tutto il resto va nel worker interattivo
 // Distendi carica un modello pesante: per non tenerlo in memoria due volte si usa sempre il worker di fondo.
-export const renderPage = (blob, params, opts = {}) => call(opts.lane === 'bg' || (params && params.dewarp) ? 'bg' : 'fg', 'render', blob, params, opts);
+// Distendi (anche solo per spostare i tratti della gomma fatti sulla pagina distesa) va sempre nella
+// stessa corsia: il modello da 31 MB si carica una volta sola.
+const needsUV = (p) => !!p && (p.dewarp || (p.erase || []).some((s) => s.g === 'd'));
+export const renderPage = (blob, params, opts = {}) => call(opts.lane === 'bg' || needsUV(params) ? 'bg' : 'fg', 'render', blob, params, opts);
 export const resizeImage = (blob, opts) => call('bg', 'resize', blob, opts);
 export const detectPage = (blob) => call('fg', 'detect', blob);

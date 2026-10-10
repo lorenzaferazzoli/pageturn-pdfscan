@@ -196,6 +196,42 @@ print(avg(0.31), avg(0.31 + 40 / ${box.height}))`]).toString().trim().split(' ')
   await page.waitForSelector('#grid');
   check(await page.evaluate(() => { const S = window.__pageturn.S; return S.pages.get(S.project.order[3]).params.dewarp === true; }), 'pagina distesa (UVDoc)');
 
+  // Distendi dopo la gomma: i tratti restano (spostati sulla pagina distesa)
+  await page.click('.th >> nth=2');
+  await page.waitForSelector('#pv[src]');
+  await page.waitForTimeout(600);
+  const pv0 = await page.$eval('#pv', (i) => i.src);
+  // i tratti come erano prima di Distendi (la pagina di prova è piatta: restano quasi nello stesso punto)
+  const before = await page.evaluate(() => { const S = window.__pageturn.S; return S.pages.get(S.project.order[2]).params.erase; });
+  await page.click('[data-a="dewarp"]');
+  await page.waitForFunction((s0) => document.querySelector('#pv').src !== s0 && document.querySelector('#busy').hidden, pv0, { timeout: 90000 });
+  await page.waitForTimeout(800);
+  {
+    // luminosità dell'anteprima lungo i tratti salvati (coordinate della pagina)
+    const v = await page.evaluate((strokes) => {
+      const pv = document.querySelector('#pv');
+      const c = document.createElement('canvas'); c.width = pv.naturalWidth; c.height = pv.naturalHeight;
+      const x = c.getContext('2d'); x.drawImage(pv, 0, 0);
+      let worst = 255;
+      for (const st of strokes) {
+        for (const [px, py] of st.pts.slice(2, -2)) {
+          const d = x.getImageData(Math.round(px * c.width) - 2, Math.round(py * c.height) - 2, 5, 5).data;
+          let s = 0; for (let i = 0; i < d.length; i += 4) s += d[i]; worst = Math.min(worst, s / 25);
+        }
+      }
+      return worst;
+    }, before);
+    check(before.length === 2 && v > 240, `gomma ancora al suo posto dopo Distendi (luminosità minima sui tratti ${Math.round(v)})`);
+    await shot('09c-gomma-distesa');
+  }
+  await page.click('[data-a="dewarp"]');
+  await page.click('[data-a="done"]');
+  await page.waitForSelector('#grid');
+  {
+    const er = await page.evaluate(() => { const S = window.__pageturn.S; const p = S.pages.get(S.project.order[2]).params; return { n: p.erase.length, dw: !!p.dewarp }; });
+    check(er.n === 2 && !er.dw, `tratti della gomma conservati dopo Distendi acceso e spento (${er.n})`);
+  }
+
   // selezione: la griglia non si ridisegna (e non torna in alto)
   await page.click('[data-a="select"]');
   await page.waitForSelector('.th .check');

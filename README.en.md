@@ -1,6 +1,6 @@
 # Pageturn
 
-*[Italiano](README.md) · English*
+*[Italiano](README.md) · English · [中文](README.zh.md)*
 
 A book scanner that turns pages into PDFs, running in your phone's browser. No app store, no account, no third-party cloud: it's a web app you add to your Home Screen. It works offline and it's open source.
 
@@ -24,9 +24,9 @@ A book scanner that turns pages into PDFs, running in your phone's browser. No a
 - **Undo and redo** for every edit to a page, splitting included.
 - **Edits to all pages** (*More* menu, can be switched on and off): filter, brightness, contrast, sharpness and *Unwarp* apply to the whole book.
 - **A4 PDF** with 1 cm margins, or pages sized like the photo.
-- **Eraser** for stains, pencil marks and fingers on the edge. The stroke appears under your finger right away and the real result follows a moment later, with a loupe showing what you're erasing.
+- **Eraser** for stains, pencil marks and fingers on the edge. The stroke appears under your finger right away and the real result follows a moment later, with a loupe showing what you're erasing. Strokes stay in place even if you turn *Unwarp* on or off afterwards.
 - **Blurry photo warning**, rotation, drag-to-reorder, and re-shooting a single page.
-- **Curved pages:** the *Unwarp* tool straightens lines bent near the binding (UVDoc model), on one page or on all selected pages.
+- **Curved pages:** the *Unwarp* tool straightens lines bent near the binding, on one page or on all selected pages. The UVDoc model estimates the shape of the page; the app turns it into a smooth surface (a sheet curving towards the binding, with no ripples), then follows the lines of text to straighten whatever is left. The page is resampled from the full-resolution photo.
 - **On-device OCR** with two engines: *Accurate* (PaddleOCR PP-OCRv5; Italian, English and other Latin-script languages) and *Fast* (Tesseract). The PDF gets a searchable, selectable text layer.
 - **Export** to PDF (three quality levels) or JPEG images. From the Share menu you can save straight to Files, iCloud Drive, Google Drive or Dropbox.
 - **Light and fast.** Processing runs in the background: in tests, 120 pages are processed without ever blocking the interface.
@@ -91,7 +91,7 @@ Photos stay on your phone and, if you set it up, on your server. OCR runs on the
 
 ## Known limitations
 
-- *Unwarp* works on the photo around the page and leaves already-flat pages untouched. With very strong folds it can distort the page edges. You see it right away in the preview, and you can switch it off or undo it.
+- *Unwarp* works on the photo around the page and leaves already-flat pages untouched. With very strong folds it can distort the page edges, and right next to the binding the letters can stay slightly narrower. You see it right away in the preview, and you can switch it off or undo it.
 - Page detection works best with the paper on a darker background. On light backgrounds it relies on the page edges, but if the facing page is as light as the one you're scanning, it's better to adjust the corners by hand (with the loupe).
 - With the in-app camera, resolution is that of the video stream (up to 4K, depending on the phone). For pages with very small print, use the native iOS camera at full resolution.
 - OCR reads Latin-script languages only: Chinese text isn't recognized yet.
@@ -121,15 +121,17 @@ npm start                    # http://localhost:8080
 npm test                     # full run in Chromium with a fake camera
 node tests/stress.mjs 120    # load test
 node tests/stabilizer.mjs    # stabilization: every shot must come out sharp
+node tests/dewarp-check.mjs  # Unwarp: how crooked the lines stay on the curved test pages
 node tests/i18n.mjs          # translations: nothing left in Italian in the English and Chinese screens
 node tests/detect-check.mjs  # draws page detection results into tests/out/
+python3 tests/make-curved.py # regenerates the curved test pages
 npm run vendor               # after updating the libraries
 sh scripts/paddle-models.sh  # to download the PaddleOCR models again
 ```
 
 | Folder | Contents |
 |---|---|
-| `js/` | app (`app.js`), translations (`i18n.js`), storage (`db.js`), camera, automatic capture and stabilization (`camera.js`, `detect.js`), image processing (`proc.js`, `render.js`, in a worker), queue (`queue.js`), OCR (`ocr.js`, `paddle.js`, `paddle-worker.js`), PDF and backup (`export.js`), server backup (`sync.js`) |
+| `js/` | app (`app.js`), translations (`i18n.js`), storage (`db.js`), camera, automatic capture and stabilization (`camera.js`, `detect.js`), image processing (`proc.js`, `render.js`, in a worker), curved pages (`dewarp.js`), queue (`queue.js`), OCR (`ocr.js`, `paddle.js`, `paddle-worker.js`), PDF and backup (`export.js`), server backup (`sync.js`) |
 | `server/` | dependency-free Node server |
 | `vendor/` | bundled libraries (see [THIRD-PARTY.md](THIRD-PARTY.md)) |
 | `tests/` | automated tests and test images |

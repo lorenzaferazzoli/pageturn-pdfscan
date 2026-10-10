@@ -8,7 +8,7 @@ import { splitQuad, FULL_QUAD, homography } from './proc.js';
 import { ENGINES as OCR_ENGINES } from './ocr.js';
 import { tr, trp, sp, locale, setLang, langPref, LANGS } from './i18n.js';
 
-export const VERSION = '1.6.0';
+export const VERSION = '1.7.0';
 export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------
@@ -68,7 +68,19 @@ function sheet(html, { onClose, dismissable = true } = {}) {
     if (e.target.closest('[data-close]')) close();
   });
   document.body.append(wrap);
-  return { el: wrap.firstElementChild, close };
+  // swap: nuovo contenuto nello stesso foglio, senza animazione (es. cambio di lingua)
+  const swap = (h) => {
+    const old = wrap.firstElementChild;
+    const el = document.createElement('div');
+    el.className = 'sheet still';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.innerHTML = `<div class="grab"></div>${h}`;
+    old.replaceWith(el);
+    el.scrollTop = old.scrollTop;
+    return { el, close, swap };
+  };
+  return { el: wrap.firstElementChild, close, swap };
 }
 
 const shead = (title) => `<div class="shead"><h2>${esc(title)}</h2><button class="close" data-close aria-label="${tr('Chiudi')}">${icon('x')}</button></div>`;
@@ -619,7 +631,7 @@ async function project() {
       if (a === 'srotate') applyAll((pr) => { pr.rotation = ((pr.rotation || 0) + 1) % 4; pr.erase = []; });
       else if (a === 'sdewarp') {
         const all = [...S.selected].every((id) => S.pages.get(id).params.dewarp);
-        applyAll((pr) => { pr.dewarp = !all; pr.erase = []; });
+        applyAll((pr) => { pr.erase = tagStrokes(pr.erase, pr.dewarp); pr.dewarp = !all; });
         toast(all ? tr('Pagine non più distese') : tr('Distendo le pagine curve in background'), null, 2600);
       }
       else {
@@ -649,6 +661,9 @@ function updateSelection(el, pages) {
   if (all) all.textContent = S.selected.size === pages.length && pages.length ? tr('Nessuna') : tr('Tutte');
 }
 
+// Ogni tratto della gomma ricorda su quale pagina è stato fatto (g: 'f' piatta, 'd' distesa):
+// accendendo o spegnendo Distendi si sposta con la pagina invece di sparire.
+const tagStrokes = (erase, dewarp) => (erase || []).map((s) => (s.g ? s : { ...s, g: dewarp ? 'd' : 'f' }));
 const FILTER_LIST = [['original', 'Originale'], ['whiten', 'Sbianca'], ['gray', 'Grigi'], ['bw', 'B/N']];
 
 function pickPhotos(opts = {}) {
@@ -1715,7 +1730,7 @@ async function editor(pageId) {
     loupe.hidden = true;
     if (!stroke) return;
     mark();
-    params.erase.push({ r: stroke.r, pts: stroke.pts.map(([x, y]) => [+x.toFixed(4), +y.toFixed(4)]) });
+    params.erase.push({ r: stroke.r, g: params.dewarp ? 'd' : 'f', pts: stroke.pts.map(([x, y]) => [+x.toFixed(4), +y.toFixed(4)]) });
     stroke = null;
     dirty = true;
     preview(250); // risultato vero poco dopo il tratto; intanto il tratto resta disegnato
@@ -1754,6 +1769,7 @@ async function editor(pageId) {
     for (const p of all.values()) {
       if (p.id === page.id) continue;
       if (LOOK.every((k) => (p.params[k] ?? null) === (params[k] ?? null))) continue;
+      if (!!p.params.dewarp !== !!params.dewarp) p.params.erase = tagStrokes(p.params.erase, p.params.dewarp);
       for (const k of LOOK) p.params[k] = params[k];
       p.rev = (p.rev || 0) + 1;
       p.status = 'pending';
@@ -1814,19 +1830,18 @@ async function editor(pageId) {
       mark();
       // anche i tratti della gomma ruotano con la pagina
       const asp = pw / ph;
-      params.erase = (params.erase || []).map((s) => ({ r: s.r * asp, pts: s.pts.map(([x, y]) => [1 - y, x]) }));
+      params.erase = (params.erase || []).map((s) => ({ ...s, r: s.r * asp, pts: s.pts.map(([x, y]) => [1 - y, x]) }));
       params.rotation = ((params.rotation || 0) + 1) % 4;
       [pw, ph] = [ph, pw];
       change();
     } else if (a === 'dewarp') {
       mark();
+      params.erase = tagStrokes(params.erase, params.dewarp);
       params.dewarp = !params.dewarp;
       t.classList.toggle('on', params.dewarp);
-      // i tratti della gomma erano sulla pagina non distesa
-      params.erase = [];
-      if (params.dewarp && !(await db.kvGet('uvLoaded', false))) {
+      if (params.dewarp && !(await db.kvGet('uvLoaded2', false))) {
         toast(tr('Scarico il modello per le pagine curve (31 MB), solo la prima volta'), null, 5000);
-        db.kvSet('uvLoaded', true);
+        db.kvSet('uvLoaded2', true);
       }
       change();
     } else if (a === 'split') panelSplit();
@@ -2084,7 +2099,7 @@ function waitProcessing(onLeft, signal) {
 // =====================================================================
 // IMPOSTAZIONI
 // =====================================================================
-async function settings() {
+async function settings(prev) {
   const theme = await db.kvGet('theme', 'auto');
   const cfg = sync.config();
   let est = null;
@@ -2093,7 +2108,7 @@ async function settings() {
   try { persisted = await navigator.storage.persisted(); } catch { /* */ }
   const st = sync.getState();
   const lang = langPref();
-  const s = sheet(`${shead(tr('Impostazioni'))}
+  const html = `${shead(tr('Impostazioni'))}
     <div class="gl" style="margin-top:4px">${tr('Aspetto')}</div>
     <div class="seg" id="theme">${[['auto', tr('Automatico')], ['light', tr('Chiaro')], ['dark', tr('Scuro')]].map(([k, l]) => `<button data-t="${k}" class="${theme === k ? 'on' : ''}">${l}</button>`).join('')}</div>
 
@@ -2124,20 +2139,22 @@ async function settings() {
       <div class="li"><span>${tr('Ambiente')}</span><span class="r" style="max-width:62%">${esc(envInfo())}</span></div>
       <a class="li accent" href="${REPO}" target="_blank" rel="noopener" style="text-decoration:none"><span>${tr('Codice sorgente su GitHub')}</span>${icon('chevron-right')}</a>
     </div>
-    <p class="note">${tr('Pageturn è open source (licenza GPL-3.0). Le scansioni restano sul tuo dispositivo e sul tuo server: nessun dato passa da altri servizi.')}</p>`);
+    <p class="note">${tr('Pageturn è open source (licenza GPL-3.0). Le scansioni restano sul tuo dispositivo e sul tuo server: nessun dato passa da altri servizi.')}</p>`;
+  const s = prev ? prev.swap(html) : sheet(html);
 
   $$('#theme button', s.el).forEach((b) => (b.onclick = () => {
     applyTheme(b.dataset.t);
     $$('#theme button', s.el).forEach((x) => x.classList.toggle('on', x === b));
   }));
-  // Cambiando lingua si ridisegna la schermata sotto e si riapre il foglio, già tradotto.
+  // Cambiando lingua si ridisegna la schermata sotto il foglio e si traduce il foglio sul posto,
+  // senza chiuderlo e riaprirlo.
   $$('#lang button', s.el).forEach((b) => (b.onclick = async () => {
     if (b.dataset.l === langPref()) return;
+    $$('#lang button', s.el).forEach((x) => x.classList.toggle('on', x === b));
     await applyLang(b.dataset.l);
-    s.close();
-    if (S.view === 'home') home();
+    if (S.view === 'home') await home();
     else if (S.view === 'project') await project();
-    settings();
+    settings(s);
   }));
   const save = async () => {
     await sync.configure({ enabled: $('#sen', s.el).checked, url: $('#surl', s.el).value.trim(), token: $('#stok', s.el).value });
