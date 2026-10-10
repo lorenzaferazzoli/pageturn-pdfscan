@@ -1,5 +1,5 @@
 // Service worker: l'app funziona offline. Il motore OCR viene messo in cache al primo uso.
-const VERSION = 'pageturn-1.5.0';
+const VERSION = 'pageturn-1.5.1';
 const SHELL = [
   './',
   'index.html',

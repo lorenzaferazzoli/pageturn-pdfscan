@@ -35,7 +35,11 @@ Scanner di libri in PDF che gira nel browser del telefono. Niente app store, nie
 2. Tocca **Condividi**, poi **Aggiungi alla schermata Home**.
 3. Apri Pageturn dall'icona e consenti l'accesso alla fotocamera.
 
-Installarla è importante: Safari può cancellare i dati dei siti che non visiti da 7 giorni, ma le app aggiunte alla schermata Home ne sono esenti.
+Installarla è importante: Safari può cancellare i dati dei siti che non visiti da 7 giorni, ma le app aggiunte alla schermata Home ne sono esenti. Da iOS 16.4 si può aggiungere anche da Opera, Chrome, Edge e Firefox, sempre dal pulsante Condividi.
+
+Attenzione: l'app installata e la stessa pagina aperta in un browser hanno **archivi separati**. Se hai già scansionato dentro il browser, esporta il backup (.zip) da lì e importalo nell'app installata (*Impostazioni → Importa un backup*).
+
+In *Impostazioni → Informazioni → Ambiente* l'app mostra dove sta girando (browser, motore, funzionamento offline, OCR multithread).
 
 Su Android funziona allo stesso modo con Chrome (menu ⋮ → *Installa app*).
 

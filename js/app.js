@@ -7,7 +7,7 @@ import { renderPage, detectPage } from './jobs.js';
 import { splitQuad, FULL_QUAD, homography } from './proc.js';
 import { ENGINES as OCR_ENGINES } from './ocr.js';
 
-export const VERSION = '1.5.0';
+export const VERSION = '1.5.1';
 export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------
@@ -339,7 +339,7 @@ async function home() {
     <div class="scroll">
       <div class="head"><h1 class="large">Pageturn</h1></div>
       ${!standalone && !hideBanner ? `<div class="banner">${icon('device-floppy')}<div><b>Aggiungi Pageturn alla schermata Home</b>
-        ${isIOS ? 'Tocca Condividi in Safari, poi «Aggiungi alla schermata Home».' : 'Installa l’app dal menu del browser.'}
+        ${isIOS ? 'Dal pulsante Condividi del browser (Safari, Opera, Chrome…) scegli «Aggiungi alla schermata Home».' : 'Installa l’app dal menu del browser.'}
         Così le scansioni non vengono cancellate dal browser.</div><button class="x" data-a="hidebanner" aria-label="Nascondi">${icon('x')}</button></div>` : ''}
       ${projects.length ? `<div class="group">${projects.map((p) => `
         <div class="proj" data-a="open" data-id="${p.id}" role="button" tabindex="0">
@@ -2093,6 +2093,7 @@ async function settings() {
     <div class="gl">Informazioni</div>
     <div class="card">
       <div class="li"><span>Versione</span><span class="r">${VERSION}</span></div>
+      <div class="li"><span>Ambiente</span><span class="r" style="max-width:62%">${esc(envInfo())}</span></div>
       <a class="li accent" href="${REPO}" target="_blank" rel="noopener" style="text-decoration:none"><span>Codice sorgente su GitHub</span>${icon('chevron-right')}</a>
     </div>
     <p class="note">Pageturn è open source (licenza GPL-3.0). Le scansioni restano sul tuo dispositivo e sul tuo server: nessun dato passa da altri servizi.</p>`);
@@ -2153,6 +2154,17 @@ async function settings() {
   });
   const obs = new MutationObserver(() => { if (!s.el.isConnected) { sync.events.removeEventListener('change', onSync); obs.disconnect(); } });
   obs.observe(document.body, { childList: true });
+}
+
+// Dove sta girando l'app: utile per capire problemi legati al browser.
+function envInfo() {
+  const ua = navigator.userAgent;
+  const browser = /OPT\/|OPR\/|Opera/.test(ua) ? 'Opera' : /CriOS|Chrome\//.test(ua) ? 'Chrome' : /FxiOS|Firefox/.test(ua) ? 'Firefox' : /EdgiOS|Edg\//.test(ua) ? 'Edge' : /Safari/.test(ua) ? 'Safari' : 'browser';
+  const engine = navigator.userAgentData ? 'Chromium' : /AppleWebKit/.test(ua) ? 'WebKit' : /Gecko\//.test(ua) ? 'Gecko' : '?';
+  const parts = [standalone ? 'app installata' : `${browser}`, engine];
+  parts.push(navigator.serviceWorker && navigator.serviceWorker.controller ? 'offline sì' : 'offline no');
+  parts.push(self.crossOriginIsolated ? 'OCR multithread' : 'OCR a 1 thread');
+  return parts.join(' · ');
 }
 
 function syncText(st) {
