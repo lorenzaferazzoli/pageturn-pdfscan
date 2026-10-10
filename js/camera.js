@@ -1,8 +1,11 @@
 // Fotocamera nell'app con riconoscimento della pagina e scatto automatico.
 import { detectQuad, frameDiff, quadDelta } from './detect.js';
+import { sharpness } from './proc.js';
 
 const AW = 220; // larghezza del fotogramma di analisi dal vivo
 const SHOT_W = 400; // allo scatto si rifà il riconoscimento più preciso (piega del libro compresa)
+const BURST = 6; // fotogrammi valutati a ogni scatto: si tiene il più nitido
+const PROBE = 360; // lato del riquadro (in pixel reali) su cui si misura la nitidezza
 
 export class Camera {
   constructor(video, { onState, onCapture }) {
@@ -163,16 +166,59 @@ export class Camera {
     this.onState({ quad, phase: this.phase, progress, auto: this.auto });
   }
 
-  // Scatto: fotogramma a piena risoluzione del video.
-  async shoot(quad, gray) {
+  // Aspetta il prossimo fotogramma video (non lo stesso due volte).
+  nextFrame() {
+    const v = this.video;
+    if (v.requestVideoFrameCallback) return new Promise((r) => v.requestVideoFrameCallback(() => r()));
+    return new Promise((r) => setTimeout(r, 45));
+  }
+
+  // Stabilizzazione: si guardano alcuni fotogrammi consecutivi e si tiene il più nitido.
+  // La nitidezza si misura a piena risoluzione su un riquadro al centro della pagina, così il
+  // confronto è veloce e sensibile proprio al mosso che rovina il testo.
+  async sharpestFrame(quad) {
+    const v = this.video;
+    const W = v.videoWidth;
+    const H = v.videoHeight;
+    const cx = quad ? ((quad[0][0] + quad[1][0] + quad[2][0] + quad[3][0]) / 4) * W : W / 2;
+    const cy = quad ? ((quad[0][1] + quad[1][1] + quad[2][1] + quad[3][1]) / 4) * H : H / 2;
+    const side = Math.min(PROBE, W, H);
+    const px = Math.round(Math.min(W - side, Math.max(0, cx - side / 2)));
+    const py = Math.round(Math.min(H - side, Math.max(0, cy - side / 2)));
+    const probe = document.createElement('canvas');
+    probe.width = probe.height = side;
+    const pctx = probe.getContext('2d', { willReadFrequently: true });
+    const best = document.createElement('canvas');
+    best.width = W;
+    best.height = H;
+    const bctx = best.getContext('2d');
+    let bestScore = -1;
+    const g = new Uint8Array(side * side);
+    for (let i = 0; i < BURST; i++) {
+      if (i) await this.nextFrame();
+      if (!this.stream) break;
+      pctx.drawImage(v, px, py, side, side, 0, 0, side, side);
+      const d = pctx.getImageData(0, 0, side, side).data;
+      for (let k = 0, j = 0; j < g.length; k += 4, j++) g[j] = (d[k] * 77 + d[k + 1] * 150 + d[k + 2] * 29) >> 8;
+      const sc = sharpness(g, side, side);
+      if (sc > bestScore) {
+        bestScore = sc;
+        bctx.drawImage(v, 0, 0, W, H);
+      }
+    }
+    probe.width = probe.height = 0;
+    return best;
+  }
+
+  // Scatto: il fotogramma più nitido tra quelli appena successivi, a piena risoluzione del video.
+  async shoot(quad, gray, { settle = 0 } = {}) {
     if (this.busy || !this.stream) return;
     this.busy = true;
     try {
-      const v = this.video;
-      const c = document.createElement('canvas');
-      c.width = v.videoWidth;
-      c.height = v.videoHeight;
-      c.getContext('2d').drawImage(v, 0, 0);
+      // dopo un tocco sul pulsante il telefono oscilla per un attimo: si aspetta che si fermi
+      if (settle) await new Promise((r) => setTimeout(r, settle));
+      if (!this.stream) return;
+      const c = await this.sharpestFrame(quad);
       // riconoscimento preciso sul fotogramma scattato
       const k = SHOT_W / Math.max(c.width, c.height);
       const s = document.createElement('canvas');
@@ -198,6 +244,6 @@ export class Camera {
   manualShoot() {
     const f = this.grabSmall();
     const found = f ? detectQuad(f.g, f.w, f.h) : null;
-    return this.shoot(found ? found.quad : null, f && f.g);
+    return this.shoot(found ? found.quad : null, f && f.g, { settle: 150 });
   }
 }

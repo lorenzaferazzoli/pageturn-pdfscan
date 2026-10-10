@@ -1,5 +1,7 @@
 # Pageturn
 
+*Italiano · [English](README.en.md)*
+
 Scanner di libri in PDF che gira nel browser del telefono. Niente app store, niente account, niente cloud di terzi: è una web app che si installa sulla schermata Home, funziona offline ed è open source.
 
 **Provala:** https://lorenzaferazzoli.github.io/pageturn-pdfscan/
@@ -9,6 +11,7 @@ Scanner di libri in PDF che gira nel browser del telefono. Niente app store, nie
 ## Cosa fa
 
 - **Scatto automatico.** Riconosce la pagina nell'inquadratura e scatta da sola quando è ferma e nitida. Poi aspetta che giri pagina: vede la mano, poi la pagina nuova, e scatta di nuovo. C'è anche lo scatto manuale e, per le pagine difficili, la fotocamera nativa di iOS a piena risoluzione.
+- **Stabilizzazione.** A ogni scatto valuta alcuni fotogrammi consecutivi e tiene il più nitido, misurando il mosso proprio sul testo della pagina. Con lo scatto manuale aspetta un attimo che il telefono si fermi dopo il tocco.
 - **Niente scansioni perse.** Ogni foto viene scritta nell'archivio del browser appena scattata, prima di qualsiasi elaborazione. Se l'app si chiude o il telefono si spegne, riapri e trovi tutto.
 - **Backup automatico sul tuo server** (facoltativo). Ogni foto parte verso il tuo server appena salvata; se la rete manca, riprova da sola. In più puoi esportare il progetto in un file .zip e reimportarlo.
 - **Pagina raddrizzata** con la correzione della prospettiva, angoli regolabili a mano.
@@ -19,9 +22,9 @@ Scanner di libri in PDF che gira nel browser del telefono. Niente app store, nie
 - **Vista libera** a schermo intero con zoom e trascinamento, sulla pagina a piena risoluzione o sulla foto originale: per controllare se una foto è sfocata.
 - **Dividi** con una linea che parte sulla piega trovata e si può spostare e inclinare.
 - **Annulla e ripeti** per tutte le modifiche della pagina, divisione compresa.
-- **Modifiche a tutte le pagine** (menu *Altro*, si attiva e disattiva): filtro, luminosità, contrasto e *Distendi* valgono per tutto il libro.
+- **Modifiche a tutte le pagine** (menu *Altro*, si attiva e disattiva): filtro, luminosità, contrasto, nitidezza e *Distendi* valgono per tutto il libro.
 - **PDF in formato A4** con 1 cm di margine, oppure con le pagine della misura della foto.
-- **Gomma** per macchie, segni a matita e dita sul bordo.
+- **Gomma** per macchie, segni a matita e dita sul bordo: il tratto compare subito sotto il dito e il risultato vero arriva un istante dopo, con una lente che mostra cosa stai cancellando.
 - **Avviso sulle foto mosse**, rotazione, riordino trascinando, riscatto di una singola pagina.
 - **Pagine curve:** lo strumento *Distendi* raddrizza le righe piegate vicino alla rilegatura (modello UVDoc), su una pagina o su tutte quelle selezionate.
 - **OCR sul telefono** con due motori: *Preciso* (PaddleOCR PP-OCRv5, italiano, inglese e le altre lingue latine) e *Veloce* (Tesseract). Il PDF ha il testo ricercabile e selezionabile.
@@ -31,11 +34,11 @@ Scanner di libri in PDF che gira nel browser del telefono. Niente app store, nie
 
 ## Installarla su iPhone
 
-1. Apri https://lorenzaferazzoli.github.io/pageturn-pdfscan/ in **Safari**.
+1. Apri https://lorenzaferazzoli.github.io/pageturn-pdfscan/ in Safari, Opera, Chrome, Edge o Firefox.
 2. Tocca **Condividi**, poi **Aggiungi alla schermata Home**.
 3. Apri Pageturn dall'icona e consenti l'accesso alla fotocamera.
 
-Installarla è importante: Safari può cancellare i dati dei siti che non visiti da 7 giorni, ma le app aggiunte alla schermata Home ne sono esenti. Da iOS 16.4 si può aggiungere anche da Opera, Chrome, Edge e Firefox, sempre dal pulsante Condividi.
+Installarla è importante: Safari può cancellare i dati dei siti che non visiti da 7 giorni, ma le app aggiunte alla schermata Home ne sono esenti. Da iOS 16.4 si può aggiungere da qualsiasi browser; una volta installata, l'app si apre dall'icona e gira per conto suo, indipendente dal browser da cui l'hai aggiunta.
 
 Attenzione: l'app installata e la stessa pagina aperta in un browser hanno **archivi separati**. Se hai già scansionato dentro il browser, esporta il backup (.zip) da lì e importalo nell'app installata (*Impostazioni → Importa un backup*).
 
@@ -88,7 +91,7 @@ Le foto restano sul telefono e, se lo configuri, sul tuo server. L'OCR avviene s
 ## Limiti noti
 
 - *Distendi* lavora sulla foto attorno alla pagina e lascia intatte le pagine già piatte; con pieghe molto forti può deformare i bordi. Si vede subito nell'anteprima, si può disattivare e annullare.
-- Il riconoscimento della pagina cerca la carta chiara su uno sfondo più scuro. Su un tavolo bianco conviene lo scatto manuale e la regolazione degli angoli.
+- Il riconoscimento della pagina funziona meglio con la carta su uno sfondo più scuro. Su sfondi chiari usa le linee dei bordi, ma se la pagina accanto è chiara quanto quella da scansionare conviene sistemare gli angoli a mano (con la lente).
 - Con la fotocamera dentro l'app la risoluzione è quella del video (fino a 4K, dipende dal telefono). Per le pagine con caratteri minuti c'è la fotocamera di iOS a piena risoluzione.
 - L'OCR sul telefono richiede qualche secondo a pagina (il motore *Preciso* circa il triplo di *Veloce*); per un libro intero conviene lasciare l'app aperta in carica. La prima volta scarica i modelli: circa 27 MB per *Preciso*, 10 MB per *Veloce*, 31 MB per *Distendi*.
 
@@ -115,6 +118,7 @@ npm install
 npm start                    # http://localhost:8080
 npm test                     # prova completa in Chromium con una finta fotocamera
 node tests/stress.mjs 120    # prova di carico
+node tests/stabilizer.mjs    # stabilizzazione: ogni scatto deve risultare nitido
 node tests/detect-check.mjs  # disegna il riconoscimento delle pagine su tests/out/
 npm run vendor               # dopo aver aggiornato le librerie
 sh scripts/paddle-models.sh  # per riscaricare i modelli PaddleOCR
@@ -122,7 +126,7 @@ sh scripts/paddle-models.sh  # per riscaricare i modelli PaddleOCR
 
 | Cartella | Contenuto |
 |---|---|
-| `js/` | app (`app.js`), archivio (`db.js`), fotocamera e scatto automatico (`camera.js`, `detect.js`), elaborazione immagini (`proc.js`, `render.js`, nel worker), coda (`queue.js`), OCR (`ocr.js`, `paddle.js`, `paddle-worker.js`), PDF e backup (`export.js`), backup sul server (`sync.js`) |
+| `js/` | app (`app.js`), archivio (`db.js`), fotocamera, scatto automatico e stabilizzazione (`camera.js`, `detect.js`), elaborazione immagini (`proc.js`, `render.js`, nel worker), coda (`queue.js`), OCR (`ocr.js`, `paddle.js`, `paddle-worker.js`), PDF e backup (`export.js`), backup sul server (`sync.js`) |
 | `server/` | server Node senza dipendenze |
 | `vendor/` | librerie incluse (vedi [THIRD-PARTY.md](THIRD-PARTY.md)) |
 | `tests/` | prove automatiche e immagini di prova |

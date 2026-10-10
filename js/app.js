@@ -7,7 +7,7 @@ import { renderPage, detectPage } from './jobs.js';
 import { splitQuad, FULL_QUAD, homography } from './proc.js';
 import { ENGINES as OCR_ENGINES } from './ocr.js';
 
-export const VERSION = '1.5.1';
+export const VERSION = '1.5.2';
 export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------
@@ -1182,6 +1182,9 @@ async function editor(pageId) {
   let token = 0;
   let pvTimer = 0;
   let keepStrokes = false;
+  // geometria (ritaglio, rotazione, Distendi) dell'immagine mostrata: la gomma lavora solo se coincide
+  const geomKey = (pr) => JSON.stringify([pr.quad || null, pr.rotation || 0, !!pr.dewarp]);
+  let shownGeom = page.status === 'done' ? geomKey(page.params) : null;
   let pw = page.width || 3;
   let ph = page.height || 4;
 
@@ -1226,14 +1229,18 @@ async function editor(pageId) {
     if (token) { URL.revokeObjectURL(u); return false; } // nel frattempo è partita un'anteprima
     pv.src = u;
     pvURL = u;
+    shownGeom = geomKey(page.params);
     return true;
   }
 
-  function setPreview(blob) {
+  // onShown: chiamata quando la nuova immagine è davvero visibile (per togliere i tratti provvisori senza sfarfallio)
+  function setPreview(blob, onShown) {
     const u = URL.createObjectURL(blob);
-    if (keepStrokes) {
-      pv.onload = () => { pv.onload = null; if (keepStrokes && mode !== 'erase') { cv.width = cv.height = 0; keepStrokes = false; } };
-    }
+    pv.onload = () => {
+      pv.onload = null;
+      if (keepStrokes && mode !== 'erase') { cv.width = cv.height = 0; keepStrokes = false; }
+      if (onShown) onShown();
+    };
     pv.src = u;
     if (pvURL) URL.revokeObjectURL(pvURL);
     pvURL = u;
@@ -1244,13 +1251,19 @@ async function editor(pageId) {
     pvTimer = setTimeout(async () => {
       const my = ++token;
       $('#busy', el).hidden = false;
+      const gk = geomKey(params);
+      const nInc = (params.erase || []).length; // tratti della gomma compresi in questa anteprima
       try {
         await origP;
         const r = await renderPage(orig, params, { maxSide: 1200, quality: 0.86, cacheKey });
         if (my !== token || mode === 'crop') return;
         pw = r.width;
         ph = r.height;
-        setPreview(r.blob);
+        setPreview(r.blob, () => {
+          shownGeom = gk;
+          // gomma: i tratti ora sono nell'immagine vera, restano disegnati solo quelli più recenti
+          if (mode === 'erase' && eraseCtx) { eraseBase = Math.min(nInc, params.erase.length); redrawStrokes(); }
+        });
       } catch (e) {
         console.warn(e);
       } finally {
@@ -1574,13 +1587,16 @@ async function editor(pageId) {
         if (!params.erase.length) return;
         mark();
         params.erase.pop();
-        if (params.erase.length >= eraseBase) redrawStrokes();
-        else { eraseBase = params.erase.length; redrawStrokes(); change(); } // tratto di prima: serve rielaborare
+        eraseBase = Math.min(eraseBase, params.erase.length);
+        redrawStrokes();
+        dirty = true;
+        preview(150);
       } else {
-        const changed = params.erase.length !== eraseBase;
+        // tratti non ancora nell'anteprima: restano visibili finché arriva quella nuova
+        const pending = params.erase.length > eraseBase;
         eraseCtx = null;
-        keepStrokes = changed;
-        toView(changed);
+        keepStrokes = pending;
+        toView(pending);
       }
     };
   }
@@ -1635,7 +1651,7 @@ async function editor(pageId) {
   function eraseStart(e) {
     if (!eraseCtx) return;
     // finché l'anteprima non è aggiornata (es. dopo un ritaglio) i tratti finirebbero nel punto sbagliato
-    if (!$('#busy', el).hidden) { toast('Attendi l’anteprima aggiornata', null, 1500); return; }
+    if (shownGeom !== geomKey(params)) { toast('Attendi l’anteprima aggiornata', null, 1500); return; }
     stage.setPointerCapture(e.pointerId);
     const p0 = erasePt(e);
     stroke = { r: brush / 100, pts: [p0] };
@@ -1694,7 +1710,8 @@ async function editor(pageId) {
     mark();
     params.erase.push({ r: stroke.r, pts: stroke.pts.map(([x, y]) => [+x.toFixed(4), +y.toFixed(4)]) });
     stroke = null;
-    dirty = true; // si salva; la rielaborazione avviene con Fine
+    dirty = true;
+    preview(250); // risultato vero poco dopo il tratto; intanto il tratto resta disegnato
   }
 
   function toView(rerender) {

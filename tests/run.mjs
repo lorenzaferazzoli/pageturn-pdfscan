@@ -37,7 +37,8 @@ const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-const shot = (n) => page.screenshot({ path: join(out, `${n}.png`) });
+// schermate pulite (senza avvisi temporanei), usate anche per docs/schermate.png
+const shot = async (n) => { await page.evaluate(() => document.querySelectorAll('.toast').forEach((t) => t.remove())); return page.screenshot({ path: join(out, `${n}.png`) }); };
 
 try {
   await page.goto(`http://localhost:${PORT}/`);
@@ -166,6 +167,16 @@ print(avg(0.31), avg(0.31 + 40 / ${box.height}))`]).toString().trim().split(' ')
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.52, { steps: 10 });
   await page.mouse.up();
+  // dal vivo: senza toccare Fine, l'anteprima vera arriva e i tratti provvisori spariscono
+  const src0 = await page.$eval('#pv', (i) => i.src);
+  const live = await page.waitForFunction((s0) => {
+    const pv = document.querySelector('#pv'); const cv = document.querySelector('#cv');
+    if (pv.src === s0 || !cv.width) return false;
+    const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+    for (let i = 3; i < d.length; i += 64) if (d[i]) return false;
+    return true;
+  }, src0, { timeout: 8000 }).then(() => true).catch(() => false);
+  check(live, 'gomma dal vivo: anteprima aggiornata dopo il tratto, senza Fine');
   await page.waitForTimeout(1200);
   await shot('09-gomma');
   await page.click('[data-c="ok"]');
