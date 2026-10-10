@@ -7,7 +7,7 @@ import { renderPage, detectPage } from './jobs.js';
 import { splitQuad, FULL_QUAD, homography } from './proc.js';
 import { ENGINES as OCR_ENGINES } from './ocr.js';
 
-export const VERSION = '1.4.2';
+export const VERSION = '1.4.3';
 export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------
@@ -929,6 +929,7 @@ async function editor(pageId) {
   let origURL = null;
   let token = 0;
   let pvTimer = 0;
+  let keepStrokes = false;
   let pw = page.width || 3;
   let ph = page.height || 4;
 
@@ -957,6 +958,9 @@ async function editor(pageId) {
 
   function setPreview(blob) {
     const u = URL.createObjectURL(blob);
+    if (keepStrokes) {
+      pv.onload = () => { pv.onload = null; if (keepStrokes && mode !== 'erase') { cv.width = cv.height = 0; keepStrokes = false; } };
+    }
     pv.src = u;
     if (pvURL) URL.revokeObjectURL(pvURL);
     pvURL = u;
@@ -1051,7 +1055,7 @@ async function editor(pageId) {
   // ---- pannelli ----
   function panelView() {
     ov.innerHTML = '';
-    cv.width = cv.height = 0;
+    if (!keepStrokes) cv.width = cv.height = 0; // i tratti della gomma restano finché arriva l'anteprima nuova
     if (params.sharpness == null) params.sharpness = 50;
     const pct = (v, lo, hi) => ((v - lo) / (hi - lo)) * 100;
     const sl = (k, label, lo = -100, hi = 100) => `<label class="slider"><span>${label}</span>
@@ -1253,13 +1257,25 @@ async function editor(pageId) {
   stage.addEventListener('pointercancel', up);
 
   // ---- gomma ----
+  // I tratti si disegnano subito sopra l'anteprima, senza rielaborare la pagina a ogni tratto:
+  // la pagina si rielabora una volta sola, quando si tocca Fine.
   let brush = 3; // % della larghezza
   let stroke = null;
+  let eraseBase = 0; // tratti già presenti nell'anteprima quando si è aperta la gomma
+  let eraseCtx = null;
+  let paper = 'rgb(255,255,255)';
   function panelErase() {
     mode = 'erase';
     ov.innerHTML = '';
-    cv.width = stage.clientWidth * devicePixelRatio;
-    cv.height = stage.clientHeight * devicePixelRatio;
+    const dpr = Math.min(2, devicePixelRatio || 1); // basta per un tratto, ed è molto più leggero
+    cv.width = Math.round(stage.clientWidth * dpr);
+    cv.height = Math.round(stage.clientHeight * dpr);
+    eraseCtx = cv.getContext('2d');
+    eraseCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    eraseCtx.lineCap = eraseCtx.lineJoin = 'round';
+    params.erase = params.erase || [];
+    eraseBase = params.erase.length;
+    paper = paperColor();
     controls.innerHTML = `
       <div class="modehint">Passa il dito su macchie, segni e dita sul bordo</div>
       <div class="panel"><div class="sliders"><label class="slider"><span>Pennello</span>
@@ -1271,53 +1287,130 @@ async function editor(pageId) {
       const c = e.target.closest('[data-c]');
       if (!c) return;
       if (c.dataset.c === 'undo') {
-        if (params.erase.length) { mark(); params.erase.pop(); change(); }
-      } else toView(false);
+        if (!params.erase.length) return;
+        mark();
+        params.erase.pop();
+        if (params.erase.length >= eraseBase) redrawStrokes();
+        else { eraseBase = params.erase.length; redrawStrokes(); change(); } // tratto di prima: serve rielaborare
+      } else {
+        const changed = params.erase.length !== eraseBase;
+        eraseCtx = null;
+        keepStrokes = changed;
+        toView(changed);
+      }
     };
   }
 
+  // colore della carta nell'anteprima (bianco con i filtri da documento)
+  function paperColor() {
+    if (params.filter !== 'original') return 'rgb(255,255,255)';
+    try {
+      const c = document.createElement('canvas');
+      c.width = c.height = 8;
+      const x = c.getContext('2d');
+      x.drawImage(pv, 0, 0, 8, 8);
+      const d = x.getImageData(0, 0, 8, 8).data;
+      let best = 0;
+      for (let i = 4; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > d[best] + d[best + 1] + d[best + 2]) best = i;
+      return `rgb(${d[best]},${d[best + 1]},${d[best + 2]})`;
+    } catch {
+      return 'rgb(255,255,255)';
+    }
+  }
+
+  function toScreen([px, py], r) {
+    return [r.x + px * r.w, r.y + py * r.h];
+  }
+  function drawSeg(a, b2, rad, r) {
+    const x = eraseCtx;
+    x.strokeStyle = paper;
+    x.lineWidth = rad * r.w * 2;
+    const A = toScreen(a, r);
+    const B = toScreen(b2, r);
+    x.beginPath();
+    x.moveTo(A[0], A[1]);
+    x.lineTo(B[0] + (A[0] === B[0] && A[1] === B[1] ? 0.01 : 0), B[1]);
+    x.stroke();
+  }
+  function redrawStrokes() {
+    if (!eraseCtx) return;
+    const r = shownRect();
+    eraseCtx.clearRect(0, 0, cv.width, cv.height);
+    for (const st of params.erase.slice(eraseBase)) {
+      for (let i = 0; i < st.pts.length; i++) drawSeg(st.pts[Math.max(0, i - 1)], st.pts[i], st.r, r);
+    }
+  }
+
+  // rettangolo dell'immagine davvero mostrata (non le dimensioni salvate, che possono essere di una versione precedente)
+  const shownRect = () => imgRect(pv.naturalWidth || pw, pv.naturalHeight || ph);
   function erasePt(e) {
-    const r = imgRect(pw, ph);
+    const r = shownRect();
     const b = stage.getBoundingClientRect();
     return [(e.clientX - b.left - r.x) / r.w, (e.clientY - b.top - r.y) / r.h];
   }
   function eraseStart(e) {
+    if (!eraseCtx) return;
+    // finché l'anteprima non è aggiornata (es. dopo un ritaglio) i tratti finirebbero nel punto sbagliato
+    if (!$('#busy', el).hidden) { toast('Attendi l’anteprima aggiornata', null, 1500); return; }
     stage.setPointerCapture(e.pointerId);
-    stroke = { r: brush / 100, pts: [erasePt(e)] };
-    eraseDraw();
+    const p0 = erasePt(e);
+    stroke = { r: brush / 100, pts: [p0] };
+    drawSeg(p0, p0, stroke.r, shownRect());
+    eraseLoupe(p0);
   }
   function eraseMove(e) {
     if (!stroke) return;
-    stroke.pts.push(erasePt(e));
-    eraseDraw();
+    const r = shownRect();
+    // anche i punti intermedi che il telefono raccoglie tra due eventi
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const ev of evs.length ? evs : [e]) {
+      const p1 = erasePt(ev);
+      const p0 = stroke.pts[stroke.pts.length - 1];
+      if (Math.hypot((p1[0] - p0[0]) * r.w, (p1[1] - p0[1]) * r.h) < 1.5) continue;
+      stroke.pts.push(p1);
+      drawSeg(p0, p1, stroke.r, r);
+    }
+    eraseLoupe(stroke.pts[stroke.pts.length - 1]);
   }
+  // Lente della gomma: il dito copre il punto, la lente mostra cosa si sta cancellando.
+  function eraseLoupe(pt) {
+    const S2 = 128;
+    const Z = 2.5;
+    const dpr = devicePixelRatio || 1;
+    const r = shownRect();
+    loupe.hidden = false;
+    loupe.width = loupe.height = S2 * dpr;
+    const left = pt[0] > 0.5;
+    loupe.style.left = left ? '12px' : '';
+    loupe.style.right = left ? '' : '12px';
+    const x = loupe.getContext('2d');
+    x.setTransform(dpr, 0, 0, dpr, 0, 0);
+    x.fillStyle = '#111';
+    x.fillRect(0, 0, S2, S2);
+    // punto del dito sullo schermo, e porzione attorno ingrandita: anteprima + tratti
+    const sx = r.x + pt[0] * r.w;
+    const sy = r.y + pt[1] * r.h;
+    const half = S2 / 2 / Z;
+    const kx = (pv.naturalWidth || 1) / r.w;
+    x.imageSmoothingQuality = 'high';
+    x.drawImage(pv, (sx - half - r.x) * kx, (sy - half - r.y) * kx, half * 2 * kx, half * 2 * kx, 0, 0, S2, S2);
+    const cr = cv.width / stage.clientWidth;
+    x.drawImage(cv, (sx - half) * cr, (sy - half) * cr, half * 2 * cr, half * 2 * cr, 0, 0, S2, S2);
+    // cerchio del pennello
+    x.strokeStyle = 'rgba(24,95,165,0.9)';
+    x.lineWidth = 1.5;
+    x.beginPath();
+    x.arc(S2 / 2, S2 / 2, (brush / 100) * r.w * Z, 0, Math.PI * 2);
+    x.stroke();
+  }
+
   function eraseEnd() {
+    loupe.hidden = true;
     if (!stroke) return;
     mark();
-    params.erase = params.erase || [];
     params.erase.push({ r: stroke.r, pts: stroke.pts.map(([x, y]) => [+x.toFixed(4), +y.toFixed(4)]) });
     stroke = null;
-    const x = cv.getContext('2d');
-    x.clearRect(0, 0, cv.width, cv.height);
-    change();
-  }
-  function eraseDraw() {
-    const x = cv.getContext('2d');
-    const r = imgRect(pw, ph);
-    const k = devicePixelRatio;
-    x.clearRect(0, 0, cv.width, cv.height);
-    x.strokeStyle = 'rgba(255,255,255,0.85)';
-    x.fillStyle = 'rgba(255,255,255,0.85)';
-    x.lineCap = x.lineJoin = 'round';
-    x.lineWidth = stroke.r * r.w * 2 * k;
-    x.beginPath();
-    stroke.pts.forEach(([px, py], i) => {
-      const X = (r.x + px * r.w) * k;
-      const Y = (r.y + py * r.h) * k;
-      i ? x.lineTo(X, Y) : x.moveTo(X, Y);
-    });
-    if (stroke.pts.length === 1) x.lineTo((r.x + stroke.pts[0][0] * r.w) * k + 0.1, (r.y + stroke.pts[0][1] * r.h) * k);
-    x.stroke();
+    dirty = true; // si salva; la rielaborazione avviene con Fine
   }
 
   function toView(rerender) {

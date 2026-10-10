@@ -141,7 +141,15 @@ try {
   const box = await page.locator('#stage').boundingBox();
   await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.3);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.32, { steps: 6 });
+  const tStroke = Date.now();
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.32, { steps: 30 });
+  await page.mouse.up();
+  const strokeMs = Date.now() - tStroke;
+  check(strokeMs < 1500, `tratto della gomma fluido (${strokeMs} ms per 30 movimenti)`);
+  // un secondo tratto subito dopo, senza attendere
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.52, { steps: 10 });
   await page.mouse.up();
   await page.waitForTimeout(1200);
   await shot('09-gomma');
@@ -149,7 +157,7 @@ try {
   await page.click('[data-a="done"]');
   await page.waitForSelector('#grid');
   const erased = await page.evaluate(() => { const S = window.__pageturn.S; return S.pages.get(S.project.order[2]).params.erase.length; });
-  check(erased === 1, 'tratto della gomma salvato');
+  check(erased === 2, `tratti della gomma salvati (${erased})`);
 
   // pagina curva: Distendi
   await page.click('.th >> nth=3');
