@@ -6,7 +6,8 @@ import { otsu, homography } from './proc.js';
 //   quad: la pagina da usare (TL,TR,BR,BL normalizzati); full: tutta la regione chiara;
 //   spine: la piega del libro aperto, se c'è; halves: [sinistra, destra] divise lungo la piega.
 // fast: per il mirino dal vivo; se la regione chiara dà già una pagina convincente non si cercano le rette.
-export function detectQuad(gray, w, h, { fast = false } = {}) {
+// spine: false per non cercare la piega (mirino).
+export function detectQuad(gray, w, h, { fast = false, spine = true } = {}) {
   const n = w * h;
   // Sfocatura 3×3 per togliere rumore e testo minuto.
   const b = new Uint8Array(n);
@@ -63,7 +64,7 @@ export function detectQuad(gray, w, h, { fast = false } = {}) {
     }
   }
   if (!q || qs < 0.38) return null;
-  return finish(b, w, h, q, qs, !fast);
+  return finish(b, w, h, q, qs, spine);
 }
 
 // Regione chiara più grande (la carta su uno sfondo più scuro) e suoi angoli.

@@ -119,7 +119,16 @@ export class Camera {
     if (this.busy) return;
     const f = this.grabSmall();
     if (!f) return;
-    const found = detectQuad(f.g, f.w, f.h, { fast: true });
+    // di norma basta la regione chiara (veloce); se non trova la pagina si cercano anche le linee
+    // dei bordi (sfondi chiari, libro tenuto in mano), ma solo un fotogramma su tre: negli altri due
+    // si tiene l'ultimo risultato delle linee.
+    this.tick = (this.tick || 0) + 1;
+    let found = detectQuad(f.g, f.w, f.h, { fast: true });
+    if (found) this.lineHit = null;
+    else if (this.tick % 3 === 0) {
+      found = detectQuad(f.g, f.w, f.h, { spine: false });
+      this.lineHit = found ? { found, tick: this.tick } : null;
+    } else if (this.lineHit && this.tick - this.lineHit.tick < 3) found = this.lineHit.found;
     const motion = frameDiff(f.g, this.prevGray);
     this.prevGray = f.g;
     const quad = found ? found.quad : null;
