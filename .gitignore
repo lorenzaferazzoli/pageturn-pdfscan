@@ -1,0 +1,6 @@
+node_modules/
+data/
+tests/out/
+tests/fixtures/cam.y4m
+tests/fixtures/f?.png
+.DS_Store

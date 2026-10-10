@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Sfoglia</title>
+  <meta name="description" content="Scanner di libri in PDF: leggero, offline, open source.">
+  <meta name="theme-color" content="#f4f4f2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e0e0d" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Sfoglia">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/app.css">
+  <script>
+    // Tema prima del primo disegno, per evitare il lampo chiaro.
+    try { var t = localStorage.getItem('sfoglia-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <input type="file" id="pick-photos" accept="image/*" multiple hidden>
+  <input type="file" id="pick-camera" accept="image/*" capture="environment" hidden>
+  <input type="file" id="pick-backup" accept=".zip,application/zip" hidden>
+  <noscript>Sfoglia ha bisogno di JavaScript.</noscript>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

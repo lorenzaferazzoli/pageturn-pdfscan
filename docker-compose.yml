@@ -1,0 +1,11 @@
+services:
+  sfoglia:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      # Codice di accesso da inserire nelle impostazioni dell'app (consigliato)
+      SFOGLIA_TOKEN: "cambiami"
+    restart: unless-stopped

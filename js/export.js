@@ -1,0 +1,217 @@
+// Esportazione: PDF (con testo ricercabile invisibile), immagini, backup del progetto.
+import {
+  PDFDocument, StandardFonts, pushGraphicsState, popGraphicsState, beginText, endText,
+  setFontAndSize, setTextRenderingMode, TextRenderingMode, setTextMatrix, showText, setCharacterSqueeze,
+} from '../vendor/pdf-lib.esm.min.js';
+import { zipSync, unzipSync, strToU8, strFromU8 } from '../vendor/fflate.js';
+import * as db from './db.js';
+import { resizeImage } from './jobs.js';
+import { recognize, terminate } from './ocr.js';
+import { PROC } from './queue.js';
+
+export const QUALITY = {
+  low: { maxSide: 1500, quality: 0.62, label: 'Bassa' },
+  medium: { maxSide: 2400, quality: 0.82, label: 'Media' },
+  high: { maxSide: 2400, quality: 0.92, label: 'Alta' },
+};
+
+const DPI = 300; // le pagine elaborate (2400 px sul lato lungo) corrispondono a circa 300 dpi
+
+async function pageImage(id, q) {
+  const proc = await db.getBlob(`${id}:proc`);
+  if (!proc) throw new Error('Pagina non ancora elaborata');
+  if (q === 'medium') return { blob: proc };
+  return resizeImage(proc, QUALITY[q]);
+}
+
+async function bytes(blob) {
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+// Stima della dimensione del PDF dalle pagine già elaborate.
+export async function estimate(project, q) {
+  let tot = 0;
+  let n = 0;
+  for (const id of project.order.slice(0, 12)) {
+    const b = await db.getBlob(`${id}:proc`);
+    if (b) { tot += b.size; n++; }
+  }
+  if (!n) return 0;
+  const k = q === 'low' ? 0.35 : q === 'high' ? 1.45 : 1;
+  return (tot / n) * project.order.length * k;
+}
+
+function sanitize(font, s) {
+  try {
+    font.encodeText(s);
+    return s;
+  } catch {
+    const t = s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[‘’]/g, "'").replace(/[“”]/g, '"')
+      .replace(/[–—]/g, '-').replace(/[^\x20-\x7e]/g, '');
+    return t;
+  }
+}
+
+// onProgress({ phase: 'ocr'|'pdf', done, total, detail })
+export async function buildPdf(project, { quality = 'medium', ocr = true, langs = ['ita', 'eng'], onProgress, signal } = {}) {
+  const pages = await db.getPages(project.id);
+  const ids = project.order.filter((id) => pages.has(id));
+  const total = ids.length;
+
+  if (ocr) {
+    const key = langs.join('+');
+    for (let i = 0; i < total; i++) {
+      if (signal && signal.aborted) throw new DOMException('annullato', 'AbortError');
+      const p = pages.get(ids[i]);
+      if (p.ocr && p.ocr.rev === p.rev && p.ocr.langs === key) continue;
+      onProgress && onProgress({ phase: 'ocr', done: i, total });
+      let proc = await db.getBlob(`${p.id}:proc`);
+      if (!proc) continue;
+      // Tesseract legge meglio caratteri grandi: le pagine piccole si ingrandiscono.
+      let ow = p.width;
+      let oh = p.height;
+      if (Math.max(ow, oh) < 2000) {
+        const big = await resizeImage(proc, { maxSide: 2400, quality: 0.92, up: true });
+        proc = big.blob;
+        ow = big.width;
+        oh = big.height;
+      }
+      const r = await recognize(proc, langs, (m) => {
+        if (m.status === 'recognizing text') onProgress && onProgress({ phase: 'ocr', done: i + m.progress, total });
+        else if (m.status && /load|init/.test(m.status)) onProgress && onProgress({ phase: 'ocr', done: i, total, detail: 'Preparo il riconoscimento del testo' });
+      });
+      p.ocr = { rev: p.rev, langs: key, width: ow, height: oh, words: r.words, text: r.text };
+      await db.putPage(p);
+    }
+    await terminate(); // libera la memoria del motore OCR
+  }
+
+  const doc = await PDFDocument.create();
+  doc.setTitle(project.name);
+  doc.setCreator('Sfoglia');
+  doc.setProducer('Sfoglia');
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  for (let i = 0; i < total; i++) {
+    if (signal && signal.aborted) throw new DOMException('annullato', 'AbortError');
+    onProgress && onProgress({ phase: 'pdf', done: i, total });
+    const p = pages.get(ids[i]);
+    const img = await pageImage(p.id, quality);
+    const jpg = await doc.embedJpg(await bytes(img.blob));
+    const W = (p.width * 72) / DPI;
+    const H = (p.height * 72) / DPI;
+    const page = doc.addPage([W, H]);
+    page.drawImage(jpg, { x: 0, y: 0, width: W, height: H });
+    if (ocr && p.ocr && p.ocr.words.length) addTextLayer(page, font, p.ocr, W, H);
+  }
+  onProgress && onProgress({ phase: 'pdf', done: total, total });
+  const out = await doc.save({ useObjectStreams: true });
+  return new Blob([out], { type: 'application/pdf' });
+}
+
+// Testo invisibile sopra l'immagine: selezionabile e ricercabile, allineato alle parole.
+function addTextLayer(page, font, ocr, W, H) {
+  page.setFont(font);
+  const key = page.fontKey;
+  const sx = W / ocr.width;
+  const sy = H / ocr.height;
+  const ops = [pushGraphicsState(), beginText(), setTextRenderingMode(TextRenderingMode.Invisible)];
+  for (const [x0, y0, x1, y1, raw] of ocr.words) {
+    const t = sanitize(font, raw);
+    if (!t) continue;
+    const h = (y1 - y0) * sy;
+    const w = (x1 - x0) * sx;
+    const size = Math.max(1, h * 0.95);
+    const tw = font.widthOfTextAtSize(t, size);
+    if (!tw) continue;
+    const squeeze = Math.max(10, Math.min(500, (w / tw) * 100));
+    ops.push(
+      setFontAndSize(key, size),
+      setCharacterSqueeze(squeeze),
+      setTextMatrix(1, 0, 0, 1, x0 * sx, H - y1 * sy + h * 0.2),
+      showText(font.encodeText(t)),
+    );
+  }
+  ops.push(endText(), popGraphicsState());
+  page.pushOperators(...ops);
+}
+
+// Pagine come immagini JPEG (zip).
+export async function buildImagesZip(project, { quality = 'medium', onProgress } = {}) {
+  const files = {};
+  const n = project.order.length;
+  const pad = String(n).length;
+  for (let i = 0; i < n; i++) {
+    onProgress && onProgress({ phase: 'img', done: i, total: n });
+    const img = await pageImage(project.order[i], quality);
+    files[`${slug(project.name)}-${String(i + 1).padStart(pad, '0')}.jpg`] = [await bytes(img.blob), { level: 0 }];
+  }
+  return new Blob([zipSync(files)], { type: 'application/zip' });
+}
+
+export async function buildText(project) {
+  const pages = await db.getPages(project.id);
+  return project.order.map((id, i) => `--- Pagina ${i + 1} ---\n${(pages.get(id)?.ocr?.text || '').trim()}`).join('\n\n');
+}
+
+// ---------- backup ----------
+
+// Backup completo: foto originali + impostazioni di ogni pagina, così si può rielaborare tutto.
+export async function buildBackup(project, onProgress) {
+  const pages = await db.getPages(project.id);
+  const files = {};
+  const list = [];
+  const n = project.order.length;
+  for (let i = 0; i < n; i++) {
+    onProgress && onProgress({ phase: 'zip', done: i, total: n });
+    const p = pages.get(project.order[i]);
+    if (!p) continue;
+    const key = db.origKey(p);
+    const name = `originali/${p.origId || p.id}.jpg`;
+    if (!files[name]) {
+      const orig = await db.getBlob(key);
+      if (!orig) continue;
+      files[name] = [await bytes(orig), { level: 0 }];
+    }
+    const { ocr, ...rest } = p;
+    list.push(rest);
+  }
+  const meta = { format: 'sfoglia-backup', version: 1, exported: Date.now(), project: { ...project }, pages: list };
+  files['progetto.json'] = strToU8(JSON.stringify(meta, null, 1));
+  return new Blob([zipSync(files)], { type: 'application/zip' });
+}
+
+// Ripristina un backup come nuovo progetto (non sovrascrive nulla di esistente).
+export async function importBackup(file) {
+  const z = unzipSync(new Uint8Array(await file.arrayBuffer()));
+  if (!z['progetto.json']) throw new Error('Questo file non è un backup di Sfoglia');
+  const meta = JSON.parse(strFromU8(z['progetto.json']));
+  const existing = await db.getProject(meta.project.id);
+  const project = await db.createProject(existing ? `${meta.project.name} (ripristino)` : meta.project.name);
+  const items = [];
+  const newId = new Map(meta.pages.map((p) => [p.id, db.uid()]));
+  const written = new Set();
+  for (const p of meta.pages) {
+    const src = p.origId || p.id;
+    const data = z[`originali/${src}.jpg`];
+    if (!data) continue;
+    const id = newId.get(p.id);
+    const origId = newId.get(src) || db.uid();
+    const page = { ...p, id, origId: origId === id ? undefined : origId, projectId: project.id, status: 'pending', rev: (p.rev || 0) + 1, synced: false };
+    const first = !written.has(src);
+    written.add(src);
+    items.push({ page, orig: first ? new Blob([data], { type: 'image/jpeg' }) : null });
+    if (items.length >= 20) await db.addPages(project.id, items.splice(0));
+  }
+  if (items.length) await db.addPages(project.id, items);
+  const fresh = await db.getProject(project.id);
+  fresh.pagesSinceBackup = 0;
+  fresh.lastBackup = meta.exported;
+  await db.putProject(fresh);
+  return fresh;
+}
+
+export function slug(s) {
+  return (s || 'scansione').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'scansione';
+}
+
+export { PROC };
