@@ -1,6 +1,6 @@
 {
   "name": "pageturn",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Scanner di libri in PDF per iPhone e Android: web app offline, OCR, backup automatico, open source.",
   "scripts": {
     "start": "node server/server.js",
@@ -13,6 +13,7 @@
     "@tesseract.js-data/eng": "^1.0.0",
     "@tesseract.js-data/ita": "^1.0.0",
     "fflate": "^0.8.3",
+    "onnxruntime-web": "^1.30.0",
     "pdf-lib": "^1.17.1",
     "tesseract.js": "^7.0.0"
   },

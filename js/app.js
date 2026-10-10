@@ -5,8 +5,9 @@ import { Camera } from './camera.js';
 import { icon } from './icons.js';
 import { renderPage, detectPage } from './jobs.js';
 import { splitQuad, FULL_QUAD } from './proc.js';
+import { ENGINES as OCR_ENGINES } from './ocr.js';
 
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';
 export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------
@@ -1223,7 +1224,7 @@ async function editor(pageId) {
 async function exportSheet() {
   const P = S.project;
   const E = await import('./export.js');
-  const o = await db.kvGet('exportOpts', { kind: 'pdf', ocr: true, ita: true, eng: true, quality: 'medium' });
+  const o = { kind: 'pdf', ocr: true, engine: 'paddle', ita: true, eng: true, quality: 'medium', ...(await db.kvGet('exportOpts', {})) };
   const st = sync.getState();
   const s = sheet(`${shead('Esporta')}
     <div class="seg" id="kind"><button data-k="pdf">PDF</button><button data-k="img">Immagini</button></div>
@@ -1244,8 +1245,13 @@ async function exportSheet() {
       (o.kind === 'pdf'
         ? `<div class="gl">PDF</div><div class="card">
             <label class="li"><span>Testo ricercabile (OCR)</span>${sw('ocr', o.ocr)}</label>
-            ${o.ocr ? `<label class="li"><span>Italiano</span>${sw('ita', o.ita)}</label><label class="li"><span>Inglese</span>${sw('eng', o.eng)}</label>` : ''}
-          </div>${o.ocr ? '<p class="note">Il riconoscimento del testo avviene sul telefono. La prima volta scarica circa 15 MB, poi funziona anche offline.</p>' : ''}`
+            ${o.ocr && o.engine === 'tesseract' ? `<label class="li"><span>Italiano</span>${sw('ita', o.ita)}</label><label class="li"><span>Inglese</span>${sw('eng', o.eng)}</label>` : ''}
+          </div>
+          ${o.ocr ? `<div class="gl">Riconoscimento del testo</div>
+            <div class="seg" id="engine">${Object.entries(OCR_ENGINES).map(([k, v]) => `<button data-e="${k}" class="${o.engine === k ? 'on' : ''}">${v.label} · ${v.name}</button>`).join('')}</div>
+            <p class="note">${o.engine === 'paddle'
+              ? 'Più preciso su foto, pagine curve e caratteri piccoli. Riconosce italiano, inglese e le altre lingue con alfabeto latino. La prima volta scarica circa 27 MB.'
+              : 'Circa tre volte più veloce, meno preciso sulle foto difficili. La prima volta scarica circa 10 MB.'} Tutto avviene sul telefono, poi funziona anche offline.</p>` : ''}`
         : '') +
       `<div class="gl">Qualità</div>${qseg}<p class="note" id="est">Stima in corso…</p>`;
     $('#go', s.el).textContent = o.kind === 'pdf' ? 'Crea PDF' : 'Crea immagini (.zip)';
@@ -1254,6 +1260,7 @@ async function exportSheet() {
       if (i) i.onchange = () => { o[id] = i.checked; save(); draw(); };
     }
     $$('#q button', s.el).forEach((b) => (b.onclick = () => { o.quality = b.dataset.q; save(); draw(); }));
+    $$("#engine button", s.el).forEach((b) => (b.onclick = () => { o.engine = b.dataset.e; save(); draw(); }));
     const est = await E.estimate(P, o.quality);
     const el = $('#est', s.el);
     if (el) el.textContent = `${plural(P.order.length, 'pagina', 'pagine')} · circa ${bytes(est)}`;
@@ -1271,7 +1278,7 @@ async function exportSheet() {
 
   $('#go', s.el).onclick = async () => {
     const langs = [o.ita && 'ita', o.eng && 'eng'].filter(Boolean);
-    if (o.kind === 'pdf' && o.ocr && !langs.length) return toast('Scegli almeno una lingua');
+    if (o.kind === 'pdf' && o.ocr && o.engine === 'tesseract' && !langs.length) return toast('Scegli almeno una lingua');
     s.close();
     const ctrl = new AbortController();
     const prog = sheet(`${shead(o.kind === 'pdf' ? 'Creo il PDF' : 'Preparo le immagini')}
@@ -1291,7 +1298,7 @@ async function exportSheet() {
       let name;
       if (o.kind === 'pdf') {
         blob = await E.buildPdf(fresh, {
-          quality: o.quality, ocr: o.ocr, langs, signal: ctrl.signal,
+          quality: o.quality, ocr: o.ocr, engine: o.engine, langs, signal: ctrl.signal,
           onProgress: ({ phase, done, total, detail }) => {
             if (phase === 'ocr') upd((done / total) * 0.85, detail || `Riconosco il testo: pagina ${Math.min(total, Math.floor(done) + 1)} di ${total}`);
             else upd(o.ocr ? 0.85 + (done / total) * 0.15 : done / total, `Impagino: ${done} di ${total}`);

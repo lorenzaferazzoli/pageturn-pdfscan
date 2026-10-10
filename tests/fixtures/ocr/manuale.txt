@@ -1,0 +1,6 @@
+3.2 Il condizionamento operante. Secondo Skinner (1938), la probabilità che un comportamento venga emesso dipende dalle sue
+conseguenze: il rinforzo positivo aumenta la frequenza della risposta, mentre la punizione tende a ridurla. Negli esperimenti
+con la cosiddetta «Skinner box», un ratto impara a premere una leva per ottenere cibo; il tasso di risposta varia secondo il
+programma di rinforzo (a rapporto fisso, a rapporto variabile, a intervallo fisso o variabile). È importante distinguere
+il rinforzo negativo – che rimuove uno stimolo avversivo – dalla punizione, con cui viene spesso confuso¹.
+¹ Per una rassegna critica si veda Bandura, A. (1977). Social Learning Theory. Englewood Cliffs, NJ: Prentice-Hall, pp. 45–67.

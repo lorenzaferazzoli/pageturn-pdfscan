@@ -6,7 +6,7 @@ import {
 import { zipSync, unzipSync, strToU8, strFromU8 } from '../vendor/fflate.js';
 import * as db from './db.js';
 import { resizeImage } from './jobs.js';
-import { recognize, terminate } from './ocr.js';
+import { recognize, terminate, engineKey } from './ocr.js';
 import { PROC } from './queue.js';
 
 export const QUALITY = {
@@ -15,7 +15,7 @@ export const QUALITY = {
   high: { maxSide: 2400, quality: 0.92, label: 'Alta' },
 };
 
-const DPI = 300; // le pagine elaborate (2400 px sul lato lungo) corrispondono a circa 300 dpi
+const PAGE_LONG = 684; // punti tipografici: 9,5 pollici, circa 24 cm
 
 async function pageImage(id, q) {
   const proc = await db.getBlob(`${id}:proc`);
@@ -53,13 +53,13 @@ function sanitize(font, s) {
 }
 
 // onProgress({ phase: 'ocr'|'pdf', done, total, detail })
-export async function buildPdf(project, { quality = 'medium', ocr = true, langs = ['ita', 'eng'], onProgress, signal } = {}) {
+export async function buildPdf(project, { quality = 'medium', ocr = true, engine = 'paddle', langs = ['ita', 'eng'], onProgress, signal } = {}) {
   const pages = await db.getPages(project.id);
   const ids = project.order.filter((id) => pages.has(id));
   const total = ids.length;
 
   if (ocr) {
-    const key = langs.join('+');
+    const key = engineKey(engine, langs);
     for (let i = 0; i < total; i++) {
       if (signal && signal.aborted) throw new DOMException('annullato', 'AbortError');
       const p = pages.get(ids[i]);
@@ -67,20 +67,21 @@ export async function buildPdf(project, { quality = 'medium', ocr = true, langs 
       onProgress && onProgress({ phase: 'ocr', done: i, total });
       let proc = await db.getBlob(`${p.id}:proc`);
       if (!proc) continue;
-      // Tesseract legge meglio caratteri grandi: le pagine piccole si ingrandiscono.
       let ow = p.width;
       let oh = p.height;
-      if (Math.max(ow, oh) < 2000) {
+      // Tesseract legge meglio caratteri grandi: le pagine piccole si ingrandiscono (Paddle lo fa da sé).
+      if (engine === 'tesseract' && Math.max(ow, oh) < 2000) {
         const big = await resizeImage(proc, { maxSide: 2400, quality: 0.92, up: true });
         proc = big.blob;
         ow = big.width;
         oh = big.height;
       }
-      const r = await recognize(proc, langs, (m) => {
-        if (m.status === 'recognizing text') onProgress && onProgress({ phase: 'ocr', done: i + m.progress, total });
-        else if (m.status && /load|init/.test(m.status)) onProgress && onProgress({ phase: 'ocr', done: i, total, detail: 'Preparo il riconoscimento del testo' });
+      const r = await recognize(proc, { engine, langs }, (m) => {
+        if (!onProgress) return;
+        if (m.status === 'recognizing') onProgress({ phase: 'ocr', done: i + (m.progress || 0), total });
+        else onProgress({ phase: 'ocr', done: i, total, detail: 'Preparo il riconoscimento del testo' });
       });
-      p.ocr = { rev: p.rev, langs: key, width: ow, height: oh, words: r.words, text: r.text };
+      p.ocr = { rev: p.rev, langs: key, width: r.width || ow, height: r.height || oh, words: r.words, text: r.text };
       await db.putPage(p);
     }
     await terminate(); // libera la memoria del motore OCR
@@ -97,8 +98,10 @@ export async function buildPdf(project, { quality = 'medium', ocr = true, langs 
     const p = pages.get(ids[i]);
     const img = await pageImage(p.id, quality);
     const jpg = await doc.embedJpg(await bytes(img.blob));
-    const W = (p.width * 72) / DPI;
-    const H = (p.height * 72) / DPI;
+    // tutte le pagine con la stessa misura fisica (lato lungo ≈ 24 cm), qualunque sia la risoluzione della foto
+    const k = PAGE_LONG / Math.max(p.width, p.height);
+    const W = p.width * k;
+    const H = p.height * k;
     const page = doc.addPage([W, H]);
     page.drawImage(jpg, { x: 0, y: 0, width: W, height: H });
     if (ocr && p.ocr && p.ocr.words.length) addTextLayer(page, font, p.ocr, W, H);

@@ -31,7 +31,7 @@ const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.wasm': 'application/wasm', '.gz': 'application/gzip',
-  '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8', '.onnx': 'application/octet-stream', '.md': 'text/markdown; charset=utf-8',
 };
 // Cartelle dell'app che si possono servire (niente data/, server/, node_modules/).
 const PUBLIC = ['index.html', 'sw.js', 'manifest.webmanifest', 'css/', 'js/', 'vendor/', 'icons/', 'LICENSE'];
@@ -162,6 +162,10 @@ async function staticFile(req, res, path) {
       'content-length': s.size,
       'cache-control': noCache ? 'no-cache' : 'public, max-age=3600',
       'x-content-type-options': 'nosniff',
+      // isolamento cross-origin: l'OCR può usare più thread
+      'cross-origin-opener-policy': 'same-origin',
+      'cross-origin-embedder-policy': 'require-corp',
+      'cross-origin-resource-policy': 'same-origin',
     });
     if (req.method === 'HEAD') return res.end();
     createReadStream(file).pipe(res);

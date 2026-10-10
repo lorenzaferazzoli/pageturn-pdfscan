@@ -9,7 +9,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const nm = join(root, 'node_modules');
 const v = join(root, 'vendor');
 
-rmSync(v, { recursive: true, force: true });
+// vendor/paddle (modelli scaricati a parte) si conserva
+for (const d of ['tesseract', 'tessdata', 'ort']) rmSync(join(v, d), { recursive: true, force: true });
+for (const f of ['pdf-lib.esm.min.js', 'fflate.js']) rmSync(join(v, f), { force: true });
 mkdirSync(join(v, 'tesseract', 'core'), { recursive: true });
 mkdirSync(join(v, 'tessdata'), { recursive: true });
 
@@ -23,6 +25,12 @@ for (const f of ['tesseract-core-lstm', 'tesseract-core-simd-lstm', 'tesseract-c
   copy(`tesseract.js-core/${f}.wasm.js`, `tesseract/core/${f}.wasm.js`);
 }
 copy('@tesseract.js-data/ita/4.0.0_best_int/ita.traineddata.gz', 'tessdata/ita.traineddata.gz');
+// ONNX Runtime (solo il backend WebAssembly) per PaddleOCR.
+mkdirSync(join(v, 'ort'), { recursive: true });
+for (const f of ['ort.wasm.min.mjs', 'ort-wasm-simd-threaded.mjs', 'ort-wasm-simd-threaded.wasm']) copy(`onnxruntime-web/dist/${f}`, `ort/${f}`);
+// I modelli PaddleOCR (PP-OCRv5 mobile: rilevamento + riconoscimento latino) non stanno su npm:
+// si scaricano da https://github.com/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models (Apache-2.0)
+// e si mettono in vendor/paddle come det.onnx, rec-latin.onnx, dict-latin.txt. Vedi scripts/paddle-models.sh.
 copy('@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz', 'tessdata/eng.traineddata.gz');
 
 const icons = [

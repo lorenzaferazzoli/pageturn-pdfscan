@@ -134,9 +134,25 @@ try {
   const txt = execFileSync('pdftotext', [pdf, '-']).toString();
   writeFileSync(join(out, 'libro.txt'), txt);
   const flat = txt.replace(/\s+/g, ' ');
-  check(/memoria di lavoro è il sistema/i.test(flat) && /visuospaziale/.test(flat), 'PDF con testo ricercabile (OCR italiano, accenti compresi)');
+  check(/memoria di lavoro è il sistema/i.test(flat) && /visuospaziale/.test(flat), 'PDF ricercabile con PaddleOCR (italiano, accenti compresi)');
   const pages = +(execFileSync('pdfinfo', [pdf]).toString().match(/Pages:\s+(\d+)/) || [])[1];
   check(pages === 7, `PDF con 7 pagine (${pages})`);
+  check(await page.evaluate(() => crossOriginIsolated), 'pagina isolata (OCR con più thread)');
+
+  // stesso PDF con Tesseract
+  await page.click('[data-a="export"]');
+  await page.waitForSelector('#go');
+  await page.click('[data-e="tesseract"]');
+  await page.click('#go');
+  await page.waitForSelector('text=PDF pronto', { timeout: 240000 });
+  const [dl2] = await Promise.all([page.waitForEvent('download'), page.click('[data-dl]')]);
+  const pdf2 = join(out, 'libro-tesseract.pdf');
+  await dl2.saveAs(pdf2);
+  const flat2 = execFileSync('pdftotext', [pdf2, '-']).toString().replace(/\s+/g, ' ');
+  check(/memoria di lavoro è il sistema/i.test(flat2), 'PDF ricercabile anche con Tesseract');
+  await page.click('[data-a="export"]');
+  await page.click('[data-e="paddle"]');
+  await page.click('.sheet [data-close]');
 
   // backup zip ed importazione
   await page.emulateMedia({ colorScheme: 'light' });
