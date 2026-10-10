@@ -124,6 +124,17 @@ try {
   check(await page.isVisible('#loupe'), 'lente di ingrandimento sul ritaglio');
   await shot('08-ritaglio');
   await page.mouse.up();
+  // trascinando il centro del lato alto si sposta tutto il lato
+  const qBefore = await page.$$eval('#ov circle.handle', (c) => c.map((e) => [+e.getAttribute('cx'), +e.getAttribute('cy')]));
+  const mx = (qBefore[0][0] + qBefore[1][0]) / 2;
+  const my = (qBefore[0][1] + qBefore[1][1]) / 2;
+  const sbx = await page.locator('#stage').boundingBox();
+  await page.mouse.move(sbx.x + mx, sbx.y + my);
+  await page.mouse.down();
+  await page.mouse.move(sbx.x + mx, sbx.y + my + 30, { steps: 4 });
+  await page.mouse.up();
+  const qAfter = await page.$$eval('#ov circle.handle', (c) => c.map((e) => [+e.getAttribute('cx'), +e.getAttribute('cy')]));
+  check(qAfter[0][1] - qBefore[0][1] > 15 && qAfter[1][1] - qBefore[1][1] > 15 && Math.abs(qAfter[2][1] - qBefore[2][1]) < 1, 'lato del ritaglio spostato tutto insieme');
   await page.click('[data-c="cancel"]');
   // gomma: un tratto sulla pagina
   await page.click('[data-a="erase"]');

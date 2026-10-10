@@ -504,12 +504,12 @@ function houghQuads({ gx, gy, m }, w, h, rq) {
     for (let j = i + 1; j < hor.length; j++) {
       let [top, bot] = [hor[i], hor[j]];
       if (yAt(top, w / 2) > yAt(bot, w / 2)) [top, bot] = [bot, top];
-      if (yAt(bot, w / 2) - yAt(top, w / 2) < h * 0.25) continue;
+      if (yAt(bot, w / 2) - yAt(top, w / 2) < h * 0.42) continue;
       for (let k = 0; k < ver.length; k++) {
         for (let l = k + 1; l < ver.length; l++) {
           let [lef, rig] = [ver[k], ver[l]];
           if (xAt(lef, h / 2) > xAt(rig, h / 2)) [lef, rig] = [rig, lef];
-          if (xAt(rig, h / 2) - xAt(lef, h / 2) < w * 0.2) continue;
+          if (xAt(rig, h / 2) - xAt(lef, h / 2) < w * 0.3) continue;
           const q = [inter(top, lef), inter(top, rig), inter(bot, rig), inter(bot, lef)];
           if (q.some((p) => !p || p[0] < -w * 0.05 || p[0] > w * 1.05 || p[1] < -h * 0.05 || p[1] > h * 1.05)) continue;
           const d = (p, o) => Math.hypot(p[0] - o[0], p[1] - o[1]);

@@ -231,7 +231,8 @@ function bgAt(bg, x, y, out) {
 
 // Applica filtro, luminosità e contrasto, e la gomma. Modifica img sul posto.
 // brightness e contrast vanno da -100 a 100.
-export function applyFilter(img, { filter = 'whiten', brightness = 0, contrast = 0, erase = [] } = {}) {
+export function applyFilter(img, { filter = 'whiten', brightness = 0, contrast = 0, sharpness = 50, erase = [] } = {}) {
+  const sharp = Math.max(0, Math.min(100, sharpness ?? 50)) / 100;
   const { width: w, height: h, data: d } = img;
   const needBg = filter !== 'original' || erase.length;
   const bg = needBg ? backgroundMap(img) : null;
@@ -239,17 +240,22 @@ export function applyFilter(img, { filter = 'whiten', brightness = 0, contrast =
 
   // Tabella per curva tonale + luminosità/contrasto.
   const cf = contrast >= 0 ? 1 + contrast / 50 : 1 + contrast / 120;
-  const lut = new Uint8ClampedArray(256);
-  for (let v = 0; v < 256; v++) {
-    let x = v;
-    if (filter === 'whiten' || filter === 'gray') {
-      // Carta bianca oltre il 91%, inchiostro pieno: i tratti sottili restano scuri invece di sbiadire.
-      x = Math.min(1, Math.max(0, (v / 255 - 0.1) / (0.91 - 0.1)));
-      x = 255 * Math.pow(x, 1.7);
+  // Curva tonale; per i filtri da documento il nero è il punto più scuro dell'inchiostro di questa
+  // pagina (livelli automatici): testo stampato chiaro o foto poco contrastata diventano nero pieno.
+  const makeLut = (ink) => {
+    const lut = new Uint8ClampedArray(256);
+    for (let v = 0; v < 256; v++) {
+      let x = v;
+      if (filter === 'whiten' || filter === 'gray') {
+        x = Math.min(1, Math.max(0, (v - ink) / (232 - ink)));
+        x = 255 * Math.pow(x, 1.4);
+      }
+      x = (x - 128) * cf + 128 + brightness * 1.1;
+      lut[v] = x;
     }
-    x = (x - 128) * cf + 128 + brightness * 1.1;
-    lut[v] = x;
-  }
+    return lut;
+  };
+  let lut = makeLut(25);
 
   if (filter === 'original') {
     for (let i = 0; i < d.length; i += 4) {
@@ -268,16 +274,24 @@ export function applyFilter(img, { filter = 'whiten', brightness = 0, contrast =
           const g = Math.min(255, (d[i + 1] * 255) / px[1]);
           const b = Math.min(255, (d[i + 2] * 255) / px[2]);
           if (filter === 'whiten') {
-            d[i] = lut[r | 0]; d[i + 1] = lut[g | 0]; d[i + 2] = lut[b | 0];
+            d[i] = r; d[i + 1] = g; d[i + 2] = b;
           } else {
-            const l = (r * 77 + g * 150 + b * 29) >> 8;
-            d[i] = d[i + 1] = d[i + 2] = filter === 'gray' ? lut[l] : l;
+            d[i] = d[i + 1] = d[i + 2] = (r * 77 + g * 150 + b * 29) >> 8;
           }
         }
       }
     }
+    if (filter === 'whiten' || filter === 'gray') {
+      const hist = new Uint32Array(256);
+      for (let i = 0; i < d.length; i += 16) hist[(d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8]++;
+      const tot = d.length / 16;
+      let ink = 0;
+      for (let acc = 0; ink < 255 && acc + hist[ink] < tot * 0.012; ink++) acc += hist[ink];
+      lut = makeLut(Math.max(15, Math.min(110, ink)));
+      for (let i = 0; i < d.length; i += 4) { d[i] = lut[d[i]]; d[i + 1] = lut[d[i + 1]]; d[i + 2] = lut[d[i + 2]]; }
+    }
     if (filter === 'bw') {
-      sharpen(img, 0.9);
+      sharpenAll(img, sharp, 1.4);
       const hist = new Uint32Array(256);
       for (let i = 0; i < d.length; i += 4) hist[d[i]]++;
       let t = otsu(hist, w * h);
@@ -292,7 +306,7 @@ export function applyFilter(img, { filter = 'whiten', brightness = 0, contrast =
   }
 
   // Maschera di contrasto leggera sulla luminosità: contorni delle lettere più netti.
-  if (filter !== 'bw') sharpen(img, filter === 'original' ? 0.45 : 0.7);
+  if (filter !== 'bw') sharpenAll(img, sharp, filter === 'original' ? 0.8 : 1.2);
 
   // Filo di sfondo rimasto sui bordi (ritaglio non perfetto): con i filtri da documento diventa carta bianca.
   if (filter !== 'original') {
@@ -399,29 +413,45 @@ export function sharpness(gray, w, h) {
   return s2 / n - m * m;
 }
 
-// Maschera di contrasto (unsharp mask) con sfocatura 3×3: si aggiunge la differenza dalla luminosità sfocata.
-export function sharpen(img, amount) {
+// Nitidezza su due scale (contorni fini delle lettere e tratti interi), proporzionale alla pagina.
+function sharpenAll(img, sharp, k) {
+  if (sharp <= 0) return;
+  const big = Math.max(1, Math.round(Math.max(img.width, img.height) / 1200)); // 2 px su una pagina da 2400
+  sharpen(img, sharp * k * 0.8, 1);
+  sharpen(img, sharp * k * 0.5, big + 1);
+}
+
+// Maschera di contrasto (unsharp mask): si aggiunge la differenza dalla luminosità sfocata (media su (2r+1)²).
+export function sharpen(img, amount, r = 1) {
   const { width: w, height: h, data: d } = img;
-  const L = new Float32Array(w * h);
-  for (let i = 0, j = 0; j < L.length; i += 4, j++) L[j] = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
-  const T = new Float32Array(w * h);
+  const n = w * h;
+  const L = new Float32Array(n);
+  for (let i = 0, j = 0; j < n; i += 4, j++) L[j] = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+  const T = new Float32Array(n);
+  const B = new Float32Array(n);
+  const k = 2 * r + 1;
   for (let y = 0; y < h; y++) {
     const o = y * w;
-    T[o] = (L[o] * 2 + L[o + 1]) / 3;
-    for (let x = 1; x < w - 1; x++) T[o + x] = (L[o + x - 1] + L[o + x] + L[o + x + 1]) / 3;
-    T[o + w - 1] = (L[o + w - 2] + L[o + w - 1] * 2) / 3;
-  }
-  for (let y = 0; y < h; y++) {
-    const a = y > 0 ? y - 1 : y;
-    const b = y < h - 1 ? y + 1 : y;
+    let acc = 0;
+    for (let x = -r; x <= r; x++) acc += L[o + Math.min(w - 1, Math.max(0, x))];
     for (let x = 0; x < w; x++) {
-      const j = y * w + x;
-      const blur = (T[a * w + x] + T[j] + T[b * w + x]) / 3;
-      const delta = (L[j] - blur) * amount;
-      if (delta > -1 && delta < 1) continue;
-      const i = j * 4;
-      d[i] += delta; d[i + 1] += delta; d[i + 2] += delta;
+      T[o + x] = acc / k;
+      acc += L[o + Math.min(w - 1, x + r + 1)] - L[o + Math.max(0, x - r)];
     }
+  }
+  for (let x = 0; x < w; x++) {
+    let acc = 0;
+    for (let y = -r; y <= r; y++) acc += T[Math.min(h - 1, Math.max(0, y)) * w + x];
+    for (let y = 0; y < h; y++) {
+      B[y * w + x] = acc / k;
+      acc += T[Math.min(h - 1, y + r + 1) * w + x] - T[Math.max(0, y - r) * w + x];
+    }
+  }
+  for (let j = 0; j < n; j++) {
+    const delta = (L[j] - B[j]) * amount;
+    if (delta > -1 && delta < 1) continue;
+    const i = j * 4;
+    d[i] += delta; d[i + 1] += delta; d[i + 2] += delta;
   }
   return img;
 }

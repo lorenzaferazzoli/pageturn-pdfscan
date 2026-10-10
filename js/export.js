@@ -10,9 +10,9 @@ import { recognize, terminate, engineKey } from './ocr.js';
 import { PROC } from './queue.js';
 
 export const QUALITY = {
-  low: { maxSide: 1500, quality: 0.62, label: 'Bassa' },
+  low: { maxSide: 1600, quality: 0.65, label: 'Bassa' },
   medium: { maxSide: 2400, quality: 0.82, label: 'Media' },
-  high: { maxSide: 2400, quality: 0.92, label: 'Alta' },
+  high: { maxSide: 3000, quality: 0.92, label: 'Alta' },
 };
 
 const PAGE_LONG = 684; // punti tipografici: 9,5 pollici, circa 24 cm
@@ -22,7 +22,7 @@ const MARGIN = 28.35; // 1 cm
 async function pageImage(id, q) {
   const proc = await db.getBlob(`${id}:proc`);
   if (!proc) throw new Error('Pagina non ancora elaborata');
-  if (q === 'medium') return { blob: proc };
+  if (q === 'high') return { blob: proc };
   return resizeImage(proc, QUALITY[q]);
 }
 
@@ -39,7 +39,7 @@ export async function estimate(project, q) {
     if (b) { tot += b.size; n++; }
   }
   if (!n) return 0;
-  const k = q === 'low' ? 0.35 : q === 'high' ? 1.45 : 1;
+  const k = q === 'low' ? 0.3 : q === 'high' ? 1 : 0.65;
   return (tot / n) * project.order.length * k;
 }
 

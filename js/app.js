@@ -7,7 +7,7 @@ import { renderPage, detectPage } from './jobs.js';
 import { splitQuad, FULL_QUAD, homography } from './proc.js';
 import { ENGINES as OCR_ENGINES } from './ocr.js';
 
-export const VERSION = '1.3.0';
+export const VERSION = '1.4.0';
 export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------
@@ -186,6 +186,7 @@ function newParams(quad) {
     filter: (S.project && S.project.filter) || 'whiten',
     brightness: 0,
     contrast: 0,
+    sharpness: 50,
     erase: [],
   };
 }
@@ -1051,14 +1052,16 @@ async function editor(pageId) {
   function panelView() {
     ov.innerHTML = '';
     cv.width = cv.height = 0;
-    const sl = (k, label) => `<label class="slider"><span>${label}</span>
-      <input type="range" min="-100" max="100" step="1" value="${params[k]}" data-k="${k}" style="--p:${(params[k] + 100) / 2}%">
-      <span class="v">${params[k] > 0 ? '+' : ''}${params[k]}</span></label>`;
+    if (params.sharpness == null) params.sharpness = 50;
+    const pct = (v, lo, hi) => ((v - lo) / (hi - lo)) * 100;
+    const sl = (k, label, lo = -100, hi = 100) => `<label class="slider"><span>${label}</span>
+      <input type="range" min="${lo}" max="${hi}" step="1" value="${params[k]}" data-k="${k}" data-lo="${lo}" data-hi="${hi}" style="--p:${pct(params[k], lo, hi)}%">
+      <span class="v">${lo < 0 && params[k] > 0 ? '+' : ''}${params[k]}</span></label>`;
     controls.innerHTML = `
       <div class="panel">
         <div class="allbadge" id="allbadge" ${P.applyAll ? '' : 'hidden'}>${icon('copy')} Le modifiche valgono per tutte le pagine</div>
         <div class="seg" role="tablist">${FILTER_LIST.map(([k, l]) => `<button data-f="${k}" class="${params.filter === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-        <div class="sliders">${sl('brightness', 'Luminosità')}${sl('contrast', 'Contrasto')}</div>
+        <div class="sliders">${sl('brightness', 'Luminosità')}${sl('contrast', 'Contrasto')}${sl('sharpness', 'Nitidezza', 0, 100)}</div>
       </div>
       <div class="toolbar" style="margin-top:10px">
         <button class="tool" data-a="crop">${icon('crop')}Ritaglia</button>
@@ -1078,8 +1081,9 @@ async function editor(pageId) {
     $$('input[type=range]', controls).forEach((r) => (r.oninput = () => {
       mark(r.dataset.k);
       params[r.dataset.k] = +r.value;
-      r.style.setProperty('--p', `${(+r.value + 100) / 2}%`);
-      r.nextElementSibling.textContent = `${+r.value > 0 ? '+' : ''}${r.value}`;
+      const lo = +r.dataset.lo;
+      r.style.setProperty('--p', `${pct(+r.value, lo, +r.dataset.hi)}%`);
+      r.nextElementSibling.textContent = `${lo < 0 && +r.value > 0 ? '+' : ''}${r.value}`;
       change();
     }));
   }
@@ -1099,7 +1103,7 @@ async function editor(pageId) {
     ow = pv.naturalWidth;
     oh = pv.naturalHeight;
     controls.innerHTML = `
-      <div class="modehint">Trascina gli angoli sui bordi della pagina</div>
+      <div class="modehint">Trascina gli angoli, o il centro di un lato per spostarlo tutto</div>
       <div class="row2"><button class="btn sm" style="flex:1" data-c="detect">${icon('wand')} Rileva</button>
       <button class="btn sm" style="flex:1" data-c="full">Tutta la foto</button></div>
       <div class="bar"><button class="btn" data-c="cancel">Annulla</button><button class="btn primary" data-c="apply">Applica</button></div>`;
@@ -1127,10 +1131,14 @@ async function editor(pageId) {
     const r = imgRect(ow, oh);
     ov.setAttribute('viewBox', `0 0 ${stage.clientWidth} ${stage.clientHeight}`);
     const p = quad.map(([x, y]) => [r.x + x * r.w, r.y + y * r.h]);
-    ov.innerHTML = `<path class="quadline" d="M${p.map((q) => q.join(',')).join('L')}Z"/>${p.map(([x, y], i) => `<circle class="handle" data-h="${i}" cx="${x}" cy="${y}" r="11"/>`).join('')}`;
+    const mids = p.map((a2, i) => { const b2 = p[(i + 1) % 4]; return [(a2[0] + b2[0]) / 2, (a2[1] + b2[1]) / 2, Math.atan2(b2[1] - a2[1], b2[0] - a2[0])]; });
+    ov.innerHTML = `<path class="quadline" d="M${p.map((q) => q.join(',')).join('L')}Z"/>`
+      + mids.map(([x, y, ang]) => `<rect class="handle" x="${x - 14}" y="${y - 5}" width="28" height="10" rx="5" transform="rotate(${(ang * 180) / Math.PI} ${x} ${y})"/>`).join('')
+      + p.map(([x, y], i) => `<circle class="handle" data-h="${i}" cx="${x}" cy="${y}" r="11"/>`).join('');
   }
 
   let dragH = -1;
+  let edgeDrag = null;
   stage.addEventListener('pointerdown', (e) => {
     if (mode === 'crop') {
       const r = imgRect(ow, oh);
@@ -1143,8 +1151,22 @@ async function editor(pageId) {
         const d = Math.hypot(r.x + qx * r.w - x, r.y + qy * r.h - y);
         if (d < bd) { bd = d; best = i; }
       });
+      // a metà di un lato: si sposta tutto il lato, parallelo a sé stesso
+      edgeDrag = null;
+      if (best < 0) {
+        let be = 36;
+        for (let i = 0; i < 4; i++) {
+          const a2 = quad[i];
+          const b2 = quad[(i + 1) % 4];
+          const mx = r.x + ((a2[0] + b2[0]) / 2) * r.w;
+          const my = r.y + ((a2[1] + b2[1]) / 2) * r.h;
+          const d = Math.hypot(mx - x, my - y);
+          if (d < be) { be = d; edgeDrag = { i, x0: x, y0: y, q0: structuredClone(quad) }; }
+        }
+      }
       dragH = best;
       if (best >= 0) { stage.setPointerCapture(e.pointerId); drawLoupe(quad[best]); }
+      else if (edgeDrag) stage.setPointerCapture(e.pointerId);
     } else if (mode === 'erase') {
       eraseStart(e);
     }
@@ -1159,6 +1181,25 @@ async function editor(pageId) {
       ];
       drawCrop();
       drawLoupe(quad[dragH]);
+    } else if (mode === 'crop' && edgeDrag) {
+      const r = imgRect(ow, oh);
+      const b = stage.getBoundingClientRect();
+      const { i, q0 } = edgeDrag;
+      const a2 = q0[i];
+      const b2 = q0[(i + 1) % 4];
+      // solo lo spostamento perpendicolare al lato
+      const ex = (b2[0] - a2[0]) * r.w;
+      const ey = (b2[1] - a2[1]) * r.h;
+      const L = Math.hypot(ex, ey) || 1;
+      const nx = -ey / L;
+      const ny = ex / L;
+      const dx = e.clientX - b.left - edgeDrag.x0;
+      const dy = e.clientY - b.top - edgeDrag.y0;
+      const t = dx * nx + dy * ny;
+      const cl = (v) => Math.min(1, Math.max(0, v));
+      for (const j of [i, (i + 1) % 4]) quad[j] = [cl(q0[j][0] + (t * nx) / r.w), cl(q0[j][1] + (t * ny) / r.h)];
+      drawCrop();
+      drawLoupe([(quad[i][0] + quad[(i + 1) % 4][0]) / 2, (quad[i][1] + quad[(i + 1) % 4][1]) / 2]);
     } else if (mode === 'erase') eraseMove(e);
   });
   // Lente: ingrandimento attorno all'angolo che si sta spostando, dal lato opposto al dito.
@@ -1205,7 +1246,7 @@ async function editor(pageId) {
 
   const up = () => {
     loupe.hidden = true;
-    if (mode === 'crop') dragH = -1;
+    if (mode === 'crop') { dragH = -1; edgeDrag = null; }
     else if (mode === 'erase') eraseEnd();
   };
   stage.addEventListener('pointerup', up);
@@ -1289,7 +1330,7 @@ async function editor(pageId) {
 
   // ---- salvataggio ----
   // Aspetto della pagina che può valere per tutto il libro (non il ritaglio, la rotazione o la gomma).
-  const LOOK = ['filter', 'brightness', 'contrast', 'dewarp'];
+  const LOOK = ['filter', 'brightness', 'contrast', 'sharpness', 'dewarp'];
   async function commit() {
     if (!dirty) return;
     const before = page.params || {};
@@ -1384,7 +1425,7 @@ async function editor(pageId) {
         { label: 'Nuova pagina dopo questa', icon: 'square-plus', run: async () => { await commit(); pickPhotos({ index: idx + 1 }); } },
         { label: 'Ripristina la foto originale', icon: 'arrow-back-up', run: () => {
           mark();
-          Object.assign(params, { quad: FULL_QUAD, rotation: 0, filter: 'original', brightness: 0, contrast: 0, erase: [], dewarp: false });
+          Object.assign(params, { quad: FULL_QUAD, rotation: 0, filter: 'original', brightness: 0, contrast: 0, sharpness: 50, erase: [], dewarp: false });
           dirty = true;
           toView(true);
         } },

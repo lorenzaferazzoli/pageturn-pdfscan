@@ -2,7 +2,7 @@
 import * as db from './db.js';
 import { renderPage } from './jobs.js';
 
-export const PROC = { maxSide: 2400, quality: 0.82, thumb: 360 };
+export const PROC = { maxSide: 3000, quality: 0.88, thumb: 360 };
 
 export const events = new EventTarget();
 const queue = [];

@@ -5,7 +5,8 @@ import { execFileSync } from 'node:child_process';
 import { readdirSync, mkdirSync, writeFileSync } from 'node:fs';
 const AW = +process.argv[2] || 200;
 mkdirSync('tests/out', { recursive: true });
-const files = ['tests/fixtures/photo.jpg', 'tests/fixtures/photo-blur.jpg', ...readdirSync('tests/fixtures/real').filter((f) => /\.(jpe?g|png)$/.test(f)).map((f) => `tests/fixtures/real/${f}`)];
+const dir = process.argv[3] || 'tests/fixtures/real';
+const files = [...(process.argv[3] ? [] : ['tests/fixtures/photo.jpg', 'tests/fixtures/photo-blur.jpg']), ...readdirSync(dir).filter((f) => /\.(jpe?g|png)$/.test(f)).map((f) => `${dir}/${f}`)];
 for (const f of files) {
   const out = execFileSync('python3', ['-c', `import sys;from PIL import Image;im=Image.open(sys.argv[1]).convert('L');k=${AW}/max(im.size);im=im.resize((round(im.width*k),round(im.height*k)),Image.BILINEAR);sys.stdout.buffer.write(im.width.to_bytes(4,'little')+im.height.to_bytes(4,'little')+im.tobytes())`, f]);
   const w = out.readUInt32LE(0); const h = out.readUInt32LE(4);
