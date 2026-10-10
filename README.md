@@ -12,11 +12,14 @@ Scanner di libri in PDF che gira nel browser del telefono. Niente app store, nie
 - **Niente scansioni perse.** Ogni foto viene scritta nell'archivio del browser appena scattata, prima di qualsiasi elaborazione. Se l'app si chiude o il telefono si spegne, riapri e trovi tutto.
 - **Backup automatico sul tuo server** (facoltativo). Ogni foto parte verso il tuo server appena salvata; se la rete manca, riprova da sola. In più puoi esportare il progetto in un file .zip e reimportarlo.
 - **Pagina raddrizzata** con la correzione della prospettiva, angoli regolabili a mano.
-- **Sbiancamento:** carta bianca, ombra della piega e ingiallimento rimossi. Filtri Originale, Sbianca, Grigi, B/N, con luminosità e contrasto.
+- **Sbiancamento:** carta bianca, ombra della piega e ingiallimento rimossi, inchiostro pieno e una leggera maschera di contrasto per lettere nitide. Filtri Originale, Sbianca, Grigi, B/N, con luminosità e contrasto.
 - **Libro aperto:** trova la piega tra le due pagine. Con lo scatto singolo tiene la pagina intera e scarta il pezzo dell'altra; con *Doppia pagina* ogni scatto diventa due pagine, divise lungo la piega.
-- **Angoli precisi:** gli angoli sono le intersezioni dei quattro bordi, quindi un dito su un angolo o un angolo smussato non li spostano.
+- **Angoli precisi:** due metodi insieme, la zona di carta più chiara e le linee dritte dei bordi (trasformata di Hough); vince il quadrilatero con più bordi veri sotto i lati. Funziona anche su sfondi chiari e disordinati, e un dito su un angolo non lo sposta.
+- **Lente di ingrandimento** mentre si trascinano gli angoli del ritaglio.
 - **Dividi** con una linea che parte sulla piega trovata e si può spostare e inclinare.
 - **Annulla e ripeti** per tutte le modifiche della pagina, divisione compresa.
+- **Modifiche a tutte le pagine** (menu *Altro*, si attiva e disattiva): filtro, luminosità, contrasto e *Distendi* valgono per tutto il libro.
+- **PDF in formato A4** con 1 cm di margine, oppure con le pagine della misura della foto.
 - **Gomma** per macchie, segni a matita e dita sul bordo.
 - **Avviso sulle foto mosse**, rotazione, riordino trascinando, riscatto di una singola pagina.
 - **Pagine curve:** lo strumento *Distendi* raddrizza le righe piegate vicino alla rilegatura (modello UVDoc), su una pagina o su tutte quelle selezionate.

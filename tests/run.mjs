@@ -116,7 +116,14 @@ try {
   await page.click('[data-f="whiten"]');
   await page.click('[data-a="crop"]');
   await page.waitForTimeout(500);
+  // trascinando un angolo compare la lente
+  const h0 = await page.locator('.handle').first().boundingBox();
+  await page.mouse.move(h0.x + h0.width / 2, h0.y + h0.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(h0.x + h0.width / 2 + 6, h0.y + h0.height / 2 + 6, { steps: 3 });
+  check(await page.isVisible('#loupe'), 'lente di ingrandimento sul ritaglio');
   await shot('08-ritaglio');
+  await page.mouse.up();
   await page.click('[data-c="cancel"]');
   // gomma: un tratto sulla pagina
   await page.click('[data-a="erase"]');
@@ -154,6 +161,24 @@ try {
   const fRedo = await page.$eval('[data-f].on', (e) => e.dataset.f);
   check(fUndo === 'whiten' && fRedo === 'bw', `annulla e ripeti (${fUndo} → ${fRedo})`);
   await page.click('[data-a="undo"]');
+  await page.click('[data-a="done"]');
+  await page.waitForSelector('#grid');
+
+  // modifiche a tutte le pagine
+  await page.click('.th >> nth=1');
+  await page.waitForSelector('#pv[src]');
+  await page.click('[data-a="more"]');
+  await page.click('text=Modifiche a tutte le pagine');
+  await page.click('[data-f="gray"]');
+  await page.click('[data-a="done"]');
+  await page.waitForSelector('#grid');
+  const grays = await page.evaluate(() => { const S = window.__pageturn.S; return S.project.order.map((id) => S.pages.get(id).params.filter); });
+  check(grays.every((f) => f === 'gray'), `filtro applicato a tutte le pagine (${grays.join(',')})`);
+  await page.click('.th >> nth=1');
+  await page.waitForSelector('#pv[src]');
+  await page.click('[data-f="whiten"]');
+  await page.click('[data-a="more"]');
+  await page.click('text=Modifiche a tutte le pagine');
   await page.click('[data-a="done"]');
   await page.waitForSelector('#grid');
 
@@ -208,6 +233,24 @@ try {
   const pages = +(execFileSync('pdfinfo', [pdf]).toString().match(/Pages:\s+(\d+)/) || [])[1];
   check(pages === 7, `PDF con 7 pagine (${pages})`);
   check(await page.evaluate(() => crossOriginIsolated), 'pagina isolata (OCR con più thread)');
+
+  // formato A4 con margini
+  await page.click('[data-a="export"]');
+  await page.waitForSelector('#go');
+  await page.click('[data-s="a4"]');
+  await page.click('[data-e="tesseract"]');
+  await page.click('#go');
+  await page.waitForSelector('text=PDF pronto', { timeout: 240000 });
+  const [dl3] = await Promise.all([page.waitForEvent('download'), page.click('[data-dl]')]);
+  const pdf3 = join(out, 'libro-a4.pdf');
+  await dl3.saveAs(pdf3);
+  const sizes = execFileSync('pdfinfo', ['-f', '1', '-l', '20', pdf3]).toString().match(/size:\s+[\d.]+ x [\d.]+/g) || [];
+  check(sizes.length === 7 && sizes.every((x) => /595\.28 x 841\.89|841\.89 x 595\.28/.test(x)), `PDF A4: ${sizes.length} pagine A4`);
+  check(/memoria di lavoro è il sistema/i.test(execFileSync('pdftotext', [pdf3, '-']).toString().replace(/\s+/g, ' ')), 'testo ricercabile anche in A4');
+  await page.click('[data-a="export"]');
+  await page.click('[data-s="image"]');
+  await page.click('[data-e="paddle"]');
+  await page.click('.sheet [data-close]');
 
   // stesso PDF con Tesseract
   await page.click('[data-a="export"]');

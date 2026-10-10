@@ -16,6 +16,8 @@ export const QUALITY = {
 };
 
 const PAGE_LONG = 684; // punti tipografici: 9,5 pollici, circa 24 cm
+const A4 = [595.28, 841.89];
+const MARGIN = 28.35; // 1 cm
 
 async function pageImage(id, q) {
   const proc = await db.getBlob(`${id}:proc`);
@@ -53,7 +55,7 @@ function sanitize(font, s) {
 }
 
 // onProgress({ phase: 'ocr'|'pdf', done, total, detail })
-export async function buildPdf(project, { quality = 'medium', ocr = true, engine = 'paddle', langs = ['ita', 'eng'], onProgress, signal } = {}) {
+export async function buildPdf(project, { quality = 'medium', ocr = true, engine = 'paddle', langs = ['ita', 'eng'], size = 'image', onProgress, signal } = {}) {
   const pages = await db.getPages(project.id);
   const ids = project.order.filter((id) => pages.has(id));
   const total = ids.length;
@@ -98,13 +100,26 @@ export async function buildPdf(project, { quality = 'medium', ocr = true, engine
     const p = pages.get(ids[i]);
     const img = await pageImage(p.id, quality);
     const jpg = await doc.embedJpg(await bytes(img.blob));
-    // tutte le pagine con la stessa misura fisica (lato lungo ≈ 24 cm), qualunque sia la risoluzione della foto
-    const k = PAGE_LONG / Math.max(p.width, p.height);
-    const W = p.width * k;
-    const H = p.height * k;
-    const page = doc.addPage([W, H]);
-    page.drawImage(jpg, { x: 0, y: 0, width: W, height: H });
-    if (ocr && p.ocr && p.ocr.words.length) addTextLayer(page, font, p.ocr, W, H);
+    let page;
+    let box;
+    if (size === 'a4') {
+      // A4 (verticale, o orizzontale per le pagine più larghe che alte), 1 cm di margine, immagine centrata
+      const land = p.width > p.height;
+      const PW = land ? A4[1] : A4[0];
+      const PH = land ? A4[0] : A4[1];
+      const k = Math.min((PW - 2 * MARGIN) / p.width, (PH - 2 * MARGIN) / p.height);
+      const w = p.width * k;
+      const h = p.height * k;
+      page = doc.addPage([PW, PH]);
+      box = { x: (PW - w) / 2, y: (PH - h) / 2, w, h, PH };
+    } else {
+      // tutte le pagine con la stessa misura fisica (lato lungo ≈ 24 cm), qualunque sia la risoluzione della foto
+      const k = PAGE_LONG / Math.max(p.width, p.height);
+      page = doc.addPage([p.width * k, p.height * k]);
+      box = { x: 0, y: 0, w: p.width * k, h: p.height * k, PH: p.height * k };
+    }
+    page.drawImage(jpg, { x: box.x, y: box.y, width: box.w, height: box.h });
+    if (ocr && p.ocr && p.ocr.words.length) addTextLayer(page, font, p.ocr, box);
   }
   onProgress && onProgress({ phase: 'pdf', done: total, total });
   const out = await doc.save({ useObjectStreams: true });
@@ -112,11 +127,12 @@ export async function buildPdf(project, { quality = 'medium', ocr = true, engine
 }
 
 // Testo invisibile sopra l'immagine: selezionabile e ricercabile, allineato alle parole.
-function addTextLayer(page, font, ocr, W, H) {
+function addTextLayer(page, font, ocr, box) {
   page.setFont(font);
   const key = page.fontKey;
-  const sx = W / ocr.width;
-  const sy = H / ocr.height;
+  const sx = box.w / ocr.width;
+  const sy = box.h / ocr.height;
+  const top = box.y + box.h; // il PDF ha l'origine in basso
   const ops = [pushGraphicsState(), beginText(), setTextRenderingMode(TextRenderingMode.Invisible)];
   for (const [x0, y0, x1, y1, raw] of ocr.words) {
     const t = sanitize(font, raw);
@@ -130,7 +146,7 @@ function addTextLayer(page, font, ocr, W, H) {
     ops.push(
       setFontAndSize(key, size),
       setCharacterSqueeze(squeeze),
-      setTextMatrix(1, 0, 0, 1, x0 * sx, H - y1 * sy + h * 0.2),
+      setTextMatrix(1, 0, 0, 1, box.x + x0 * sx, top - y1 * sy + h * 0.2),
       showText(font.encodeText(t)),
     );
   }

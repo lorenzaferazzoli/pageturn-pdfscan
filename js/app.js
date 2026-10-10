@@ -7,7 +7,7 @@ import { renderPage, detectPage } from './jobs.js';
 import { splitQuad, FULL_QUAD, homography } from './proc.js';
 import { ENGINES as OCR_ENGINES } from './ocr.js';
 
-export const VERSION = '1.2.0';
+export const VERSION = '1.3.0';
 export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------
@@ -941,7 +941,7 @@ async function editor(pageId) {
       </div>
       <div class="side r"><button class="link" data-a="done">Fatto</button></div>
     </div>
-    <div class="stage" id="stage"><img id="pv" alt=""><svg id="ov"></svg><canvas id="cv"></canvas><span class="busy" id="busy" hidden>${icon('loader-2', 'spinner')}</span>
+    <div class="stage" id="stage"><img id="pv" alt=""><svg id="ov"></svg><canvas id="cv"></canvas><canvas id="loupe" class="loupe" hidden></canvas><span class="busy" id="busy" hidden>${icon('loader-2', 'spinner')}</span>
       <div class="histbtns"><button class="circle glass" data-a="undo" aria-label="Annulla">${icon('arrow-back-up')}</button><button class="circle glass" data-a="redoh" aria-label="Ripeti">${icon('arrow-forward-up')}</button></div></div>
     <div id="controls"></div>`);
   const stage = $('#stage', el);
@@ -999,6 +999,10 @@ async function editor(pageId) {
     H0.redo.length = 0;
     histButtons();
   }
+  function allBadge() {
+    const x = $('#allbadge', el);
+    if (x) x.hidden = !P.applyAll;
+  }
   function histButtons() {
     const u = $('[data-a="undo"]', el);
     const r = $('[data-a="redoh"]', el);
@@ -1052,6 +1056,7 @@ async function editor(pageId) {
       <span class="v">${params[k] > 0 ? '+' : ''}${params[k]}</span></label>`;
     controls.innerHTML = `
       <div class="panel">
+        <div class="allbadge" id="allbadge" ${P.applyAll ? '' : 'hidden'}>${icon('copy')} Le modifiche valgono per tutte le pagine</div>
         <div class="seg" role="tablist">${FILTER_LIST.map(([k, l]) => `<button data-f="${k}" class="${params.filter === k ? 'on' : ''}">${l}</button>`).join('')}</div>
         <div class="sliders">${sl('brightness', 'Luminosità')}${sl('contrast', 'Contrasto')}</div>
       </div>
@@ -1139,7 +1144,7 @@ async function editor(pageId) {
         if (d < bd) { bd = d; best = i; }
       });
       dragH = best;
-      if (best >= 0) stage.setPointerCapture(e.pointerId);
+      if (best >= 0) { stage.setPointerCapture(e.pointerId); drawLoupe(quad[best]); }
     } else if (mode === 'erase') {
       eraseStart(e);
     }
@@ -1153,9 +1158,53 @@ async function editor(pageId) {
         Math.min(1, Math.max(0, (e.clientY - b.top - r.y) / r.h)),
       ];
       drawCrop();
+      drawLoupe(quad[dragH]);
     } else if (mode === 'erase') eraseMove(e);
   });
+  // Lente: ingrandimento attorno all'angolo che si sta spostando, dal lato opposto al dito.
+  const loupe = $('#loupe', el);
+  function drawLoupe(pt) {
+    const S2 = 128;
+    const Z = 3; // ingrandimento rispetto all'immagine sullo schermo
+    const dpr = devicePixelRatio || 1;
+    loupe.hidden = false;
+    loupe.width = loupe.height = S2 * dpr;
+    const r = imgRect(ow, oh);
+    // a sinistra o a destra, lontano dal dito
+    const left = pt[0] > 0.5;
+    loupe.style.left = left ? '12px' : '';
+    loupe.style.right = left ? '' : '12px';
+    const x = loupe.getContext('2d');
+    const k = ow / r.w; // pixel della foto per pixel dello schermo
+    const half = (S2 / 2 / Z) * k;
+    const cx = pt[0] * ow;
+    const cy = pt[1] * oh;
+    x.save();
+    x.scale(dpr, dpr);
+    x.fillStyle = '#111';
+    x.fillRect(0, 0, S2, S2);
+    x.imageSmoothingQuality = 'high';
+    x.drawImage(pv, cx - half, cy - half, half * 2, half * 2, 0, 0, S2, S2);
+    // lati del ritaglio dentro la lente
+    const toL = ([qx, qy]) => [((qx * ow - cx) / half) * (S2 / 2) + S2 / 2, ((qy * oh - cy) / half) * (S2 / 2) + S2 / 2];
+    x.strokeStyle = 'rgba(91,155,224,0.95)';
+    x.lineWidth = 2;
+    x.beginPath();
+    quad.forEach((q, i) => { const [a2, b2] = toL(q); i ? x.lineTo(a2, b2) : x.moveTo(a2, b2); });
+    x.closePath();
+    x.stroke();
+    // mirino
+    x.strokeStyle = '#fff';
+    x.lineWidth = 1.5;
+    x.beginPath();
+    x.moveTo(S2 / 2 - 10, S2 / 2); x.lineTo(S2 / 2 + 10, S2 / 2);
+    x.moveTo(S2 / 2, S2 / 2 - 10); x.lineTo(S2 / 2, S2 / 2 + 10);
+    x.stroke();
+    x.restore();
+  }
+
   const up = () => {
+    loupe.hidden = true;
     if (mode === 'crop') dragH = -1;
     else if (mode === 'erase') eraseEnd();
   };
@@ -1239,8 +1288,13 @@ async function editor(pageId) {
   }
 
   // ---- salvataggio ----
+  // Aspetto della pagina che può valere per tutto il libro (non il ritaglio, la rotazione o la gomma).
+  const LOOK = ['filter', 'brightness', 'contrast', 'dewarp'];
   async function commit() {
     if (!dirty) return;
+    const before = page.params || {};
+    const lookChanged = LOOK.some((k) => (before[k] ?? null) !== (params[k] ?? null));
+    if (P.applyAll && lookChanged) await applyLookToAll();
     page = (await db.getPage(page.id)) || page;
     page.params = structuredClone(params);
     page.rev = (page.rev || 0) + 1;
@@ -1251,6 +1305,24 @@ async function editor(pageId) {
     queue.enqueue(page.id, true);
     sync.kick();
     dirty = false;
+  }
+
+  async function applyLookToAll() {
+    const all = await db.getPages(P.id);
+    for (const p of all.values()) {
+      if (p.id === page.id) continue;
+      if (LOOK.every((k) => (p.params[k] ?? null) === (params[k] ?? null))) continue;
+      for (const k of LOOK) p.params[k] = params[k];
+      p.rev = (p.rev || 0) + 1;
+      p.status = 'pending';
+      p.synced = false;
+      await db.putPage(p);
+      S.pages.set(p.id, p);
+      queue.enqueue(p.id);
+    }
+    // e le prossime pagine scattate nascono con lo stesso aspetto
+    P.filter = params.filter;
+    await db.putProject(Object.assign((await db.getProject(P.id)) || P, { filter: params.filter }));
   }
 
   S.cleanup = () => {
@@ -1299,6 +1371,16 @@ async function editor(pageId) {
     else if (a === 'redo') { await commit(); camera({ replaceId: page.id }); }
     else if (a === 'more') {
       menuSheet(`Pagina ${idx + 1}`, [
+        { label: `Modifiche a tutte le pagine: ${P.applyAll ? 'attivo' : 'disattivo'}`, icon: 'copy', run: async () => {
+          P.applyAll = !P.applyAll;
+          await db.putProject(Object.assign((await db.getProject(P.id)) || P, { applyAll: P.applyAll }));
+          if (P.applyAll) {
+            toast('Filtro, luminosità, contrasto e Distendi ora valgono per tutte le pagine');
+            dirty = true;
+            await applyLookToAll();
+          } else toast('Le modifiche valgono solo per questa pagina');
+          allBadge();
+        } },
         { label: 'Nuova pagina dopo questa', icon: 'square-plus', run: async () => { await commit(); pickPhotos({ index: idx + 1 }); } },
         { label: 'Ripristina la foto originale', icon: 'arrow-back-up', run: () => {
           mark();
@@ -1419,7 +1501,7 @@ async function editor(pageId) {
 async function exportSheet() {
   const P = S.project;
   const E = await import('./export.js');
-  const o = { kind: 'pdf', ocr: true, engine: 'paddle', ita: true, eng: true, quality: 'medium', ...(await db.kvGet('exportOpts', {})) };
+  const o = { kind: 'pdf', ocr: true, engine: 'paddle', ita: true, eng: true, quality: 'medium', size: 'image', ...(await db.kvGet('exportOpts', {})) };
   const st = sync.getState();
   const s = sheet(`${shead('Esporta')}
     <div class="seg" id="kind"><button data-k="pdf">PDF</button><button data-k="img">Immagini</button></div>
@@ -1438,7 +1520,10 @@ async function exportSheet() {
     const sw = (id, on) => `<span class="switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><i></i></span>`;
     $('#opts', s.el).innerHTML =
       (o.kind === 'pdf'
-        ? `<div class="gl">PDF</div><div class="card">
+        ? `<div class="gl">Formato pagina</div>
+          <div class="seg" id="psize"><button data-s="image" class="${o.size === 'image' ? 'on' : ''}">Come la foto</button><button data-s="a4" class="${o.size === 'a4' ? 'on' : ''}">A4 con margini</button></div>
+          ${o.size === 'a4' ? '<p class="note">Ogni pagina viene centrata su un foglio A4 con 1 cm di margine: tutte della stessa misura, pronte da stampare.</p>' : ''}
+          <div class="gl">PDF</div><div class="card">
             <label class="li"><span>Testo ricercabile (OCR)</span>${sw('ocr', o.ocr)}</label>
             ${o.ocr && o.engine === 'tesseract' ? `<label class="li"><span>Italiano</span>${sw('ita', o.ita)}</label><label class="li"><span>Inglese</span>${sw('eng', o.eng)}</label>` : ''}
           </div>
@@ -1456,6 +1541,7 @@ async function exportSheet() {
     }
     $$('#q button', s.el).forEach((b) => (b.onclick = () => { o.quality = b.dataset.q; save(); draw(); }));
     $$("#engine button", s.el).forEach((b) => (b.onclick = () => { o.engine = b.dataset.e; save(); draw(); }));
+    $$('#psize button', s.el).forEach((b) => (b.onclick = () => { o.size = b.dataset.s; save(); draw(); }));
     const est = await E.estimate(P, o.quality);
     const el = $('#est', s.el);
     if (el) el.textContent = `${plural(P.order.length, 'pagina', 'pagine')} · circa ${bytes(est)}`;
@@ -1493,7 +1579,7 @@ async function exportSheet() {
       let name;
       if (o.kind === 'pdf') {
         blob = await E.buildPdf(fresh, {
-          quality: o.quality, ocr: o.ocr, engine: o.engine, langs, signal: ctrl.signal,
+          quality: o.quality, ocr: o.ocr, engine: o.engine, langs, size: o.size, signal: ctrl.signal,
           onProgress: ({ phase, done, total, detail }) => {
             if (phase === 'ocr') upd((done / total) * 0.85, detail || `Riconosco il testo: pagina ${Math.min(total, Math.floor(done) + 1)} di ${total}`);
             else upd(o.ocr ? 0.85 + (done / total) * 0.15 : done / total, `Impagino: ${done} di ${total}`);

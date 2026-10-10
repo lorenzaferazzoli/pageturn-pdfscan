@@ -8,7 +8,7 @@ await new Promise((r) => setTimeout(r, 500));
 const b = await chromium.launch();
 const p = await b.newPage();
 await p.goto('http://localhost:8097/');
-const photo = readFileSync('tests/fixtures/photo.jpg').toString('base64');
+const photo = readFileSync(process.argv[2] || 'tests/fixtures/photo.jpg').toString('base64');
 const res = await p.evaluate(async (b64) => {
   const jobs = await import('/js/jobs.js');
   const blob = new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: 'image/jpeg' });

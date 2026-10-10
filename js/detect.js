@@ -33,7 +33,29 @@ export function detectQuad(gray, w, h) {
   for (let i = 0; i < 256; i++) {
     if (i <= t) { lo += i * hist[i]; nl += hist[i]; } else { hi += i * hist[i]; nh += hist[i]; }
   }
-  if (!nl || !nh || hi / nh - lo / nl < 28) return null;
+  // Per i bordi si sfoca di più: le righe di testo diventano una macchia grigia, i bordi della pagina restano.
+  const r = Math.max(1, Math.round(Math.max(w, h) / 140));
+  const bb = boxBlur(boxBlur(b, w, h, r), w, h, r);
+  const edges = sobel(bb, w, h);
+  const regionOk = nl && nh && hi / nh - lo / nl >= 28;
+  const rq = regionOk ? regionQuad(b, w, h, t) : null;
+  const cands = houghQuads(edges, w, h, rq);
+  if (rq) cands.push(rq);
+  // si tiene il quadrilatero con più bordi "veri" sotto i lati e carta più chiara all'interno
+  let q = null;
+  let qs = 0;
+  for (const c of cands) {
+    if (!convex(c) || minAngle(c) < 50) continue;
+    const sc = scoreQuad(edges, bb, w, h, c);
+    if (sc > qs) { qs = sc; q = c; }
+  }
+  if (!q || qs < 0.38) return null;
+  return finish(b, w, h, q, qs);
+}
+
+// Regione chiara più grande (la carta su uno sfondo più scuro) e suoi angoli.
+function regionQuad(b, w, h, t) {
+  const n = w * h;
 
   // Chiusura morfologica leggera: le righe di testo non devono spezzare la pagina.
   let bin = new Uint8Array(n);
@@ -84,6 +106,10 @@ export function detectQuad(gray, w, h) {
   qa = area(q);
   const fill = bestSize / qa; // quanto la regione riempie il quadrilatero
   if (fill < 0.8 || minAngle(q) < 50) return null;
+  return q;
+}
+
+function finish(b, w, h, q, fill) {
   const norm = (pts) => pts.map(([x, y]) => [Math.min(1, Math.max(0, x / w)), Math.min(1, Math.max(0, y / h))]);
   const full = norm(q);
 
@@ -221,8 +247,8 @@ function findSpine(g, w, h, q) {
     for (let v = v0; v < v1; v++) s += r[v * RW + u];
     lum[u] = s / (v1 - v0);
   }
-  const lo = Math.round(RW * 0.1);
-  const hi = Math.round(RW * 0.9);
+  const lo = Math.round(RW * 0.06);
+  const hi = Math.round(RW * 0.94);
   const win = Math.round(RW * 0.1);
   let best = -1;
   let bestScore = 0;
@@ -372,4 +398,200 @@ export function quadDelta(a, b) {
   let m = 0;
   for (let i = 0; i < 4; i++) m = Math.max(m, Math.hypot(a[i][0] - b[i][0], a[i][1] - b[i][1]));
   return m;
+}
+
+// ---------- bordi dritti (trasformata di Hough) ----------
+
+// Gradienti di Sobel (divisi per 4: valori comparabili ai livelli di grigio).
+function sobel(g, w, h) {
+  const gx = new Float32Array(w * h);
+  const gy = new Float32Array(w * h);
+  const m = new Float32Array(w * h);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const a = g[i - w - 1]; const b = g[i - w]; const c = g[i - w + 1];
+      const d = g[i - 1]; const f = g[i + 1];
+      const p = g[i + w - 1]; const q = g[i + w]; const r = g[i + w + 1];
+      const X = (c + 2 * f + r - a - 2 * d - p) / 4;
+      const Y = (p + 2 * q + r - a - 2 * b - c) / 4;
+      gx[i] = X; gy[i] = Y; m[i] = Math.hypot(X, Y);
+    }
+  }
+  return { gx, gy, m };
+}
+
+// Rette candidate per i bordi, poi tutte le combinazioni alto/basso/sinistra/destra.
+function houghQuads({ gx, gy, m }, w, h, rq) {
+  const diag = Math.ceil(Math.hypot(w, h));
+  const NT = 180;
+  const NR = 2 * diag + 1;
+  const acc = new Float32Array(NT * NR);
+  const cos = new Float32Array(NT);
+  const sin = new Float32Array(NT);
+  for (let t = 0; t < NT; t++) { cos[t] = Math.cos((t * Math.PI) / NT); sin[t] = Math.sin((t * Math.PI) / NT); }
+  // soglia: i bordi più forti dell'immagine, ma almeno un salto netto
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < m.length; i++) hist[Math.min(255, m[i] | 0)]++;
+  let T = 255;
+  for (let acc = 0; T > 0 && acc < m.length * 0.1; T--) acc += hist[T];
+  T = Math.max(9, T);
+  for (let y = 2; y < h - 2; y++) {
+    for (let x = 2; x < w - 2; x++) {
+      const i = y * w + x;
+      if (m[i] < T) continue;
+      // si vota solo vicino alla direzione del gradiente (la normale della retta)
+      let t0 = Math.round((Math.atan2(gy[i], gx[i]) * NT) / Math.PI);
+      t0 = ((t0 % NT) + NT) % NT;
+      for (let dt = -5; dt <= 5; dt++) {
+        const t = (t0 + dt + NT) % NT;
+        const r = Math.round(x * cos[t] + y * sin[t]) + diag;
+        acc[t * NR + r] += m[i];
+      }
+    }
+  }
+  // massimi locali
+  let max = 0;
+  for (let i = 0; i < acc.length; i++) if (acc[i] > max) max = acc[i];
+  const peaks = [];
+  for (let t = 0; t < NT; t++) {
+    for (let r = 0; r < NR; r++) {
+      const v = acc[t * NR + r];
+      if (v < max * 0.04) continue;
+      let ok = true;
+      for (let dt = -4; dt <= 4 && ok; dt++) {
+        const tt = (t + dt + NT) % NT;
+        const rr0 = t + dt < 0 || t + dt >= NT ? NR - 1 - r : r; // all'altro capo θ e ρ si invertono
+        for (let dr = -6; dr <= 6; dr++) {
+          const rr = rr0 + dr;
+          if (rr < 0 || rr >= NR || (dt === 0 && dr === 0)) continue;
+          if (acc[tt * NR + rr] > v) { ok = false; break; }
+        }
+      }
+      if (ok) peaks.push({ t, r: r - diag, v });
+    }
+  }
+  peaks.sort((a, b) => b.v - a.v);
+  const lines = peaks.slice(0, 60).map(({ t, r }) => ({ c: cos[t], s: sin[t], r, deg: (t * 180) / NT }));
+  // orizzontali (normale quasi verticale) e verticali
+  // rette per due punti, nella stessa forma (normale c,s e distanza r)
+  const through = (p, q) => {
+    let nx = -(q[1] - p[1]);
+    let ny = q[0] - p[0];
+    const L = Math.hypot(nx, ny) || 1;
+    nx /= L; ny /= L;
+    if (ny < 0 || (ny === 0 && nx < 0)) { nx = -nx; ny = -ny; }
+    return { c: nx, s: ny, r: p[0] * nx + p[1] * ny, deg: (Math.atan2(ny, nx) * 180) / Math.PI };
+  };
+  const hor = lines.filter((l) => Math.abs(l.deg - 90) < 35).slice(0, 9);
+  const ver = lines.filter((l) => Math.abs(l.deg - 90) > 55).slice(0, 8);
+  // anche i lati della regione chiara e i bordi dell'immagine (pagina che esce dall'inquadratura)
+  if (rq) {
+    hor.push(through(rq[0], rq[1]), through(rq[3], rq[2]));
+    ver.push(through(rq[0], rq[3]), through(rq[1], rq[2]));
+  }
+  hor.push(through([0, 1], [w, 1]), through([0, h - 2], [w, h - 2]));
+  ver.push(through([1, 0], [1, h]), through([w - 2, 0], [w - 2, h]));
+  const yAt = (l, x) => (l.r - x * l.c) / l.s;
+  const xAt = (l, y) => (l.r - y * l.s) / l.c;
+  const inter = (a, b) => {
+    const det = a.c * b.s - a.s * b.c;
+    if (Math.abs(det) < 1e-6) return null;
+    return [(a.r * b.s - b.r * a.s) / det, (a.c * b.r - b.c * a.r) / det];
+  };
+  const out = [];
+  for (let i = 0; i < hor.length; i++) {
+    for (let j = i + 1; j < hor.length; j++) {
+      let [top, bot] = [hor[i], hor[j]];
+      if (yAt(top, w / 2) > yAt(bot, w / 2)) [top, bot] = [bot, top];
+      if (yAt(bot, w / 2) - yAt(top, w / 2) < h * 0.25) continue;
+      for (let k = 0; k < ver.length; k++) {
+        for (let l = k + 1; l < ver.length; l++) {
+          let [lef, rig] = [ver[k], ver[l]];
+          if (xAt(lef, h / 2) > xAt(rig, h / 2)) [lef, rig] = [rig, lef];
+          if (xAt(rig, h / 2) - xAt(lef, h / 2) < w * 0.2) continue;
+          const q = [inter(top, lef), inter(top, rig), inter(bot, rig), inter(bot, lef)];
+          if (q.some((p) => !p || p[0] < -w * 0.05 || p[0] > w * 1.05 || p[1] < -h * 0.05 || p[1] > h * 1.05)) continue;
+          const d = (p, o) => Math.hypot(p[0] - o[0], p[1] - o[1]);
+          if (Math.min(d(q[0], q[1]), d(q[3], q[2])) < w * 0.2 || Math.min(d(q[0], q[3]), d(q[1], q[2])) < h * 0.22) continue;
+          out.push(q);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// Punteggio di un quadrilatero: quanta parte dei lati poggia su un bordo vero (gradiente
+// perpendicolare al lato), quanto l'interno è più chiaro dell'esterno, quanto è grande.
+function scoreQuad({ gx, gy }, g, w, h, q) {
+  const A = area(q) / (w * h);
+  if (A < 0.12 || A > 1.02) return 0;
+  const cx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4;
+  const cy = (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4;
+  const N = 28;
+  const sideE = [];
+  let con = 0;
+  let conN = 0;
+  for (let k = 0; k < 4; k++) {
+    const a = q[k];
+    const b = q[(k + 1) % 4];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    let nx = -(b[1] - a[1]) / len;
+    let ny = (b[0] - a[0]) / len;
+    // normale verso l'esterno
+    const mx = (a[0] + b[0]) / 2;
+    const my = (a[1] + b[1]) / 2;
+    if ((mx - cx) * nx + (my - cy) * ny < 0) { nx = -nx; ny = -ny; }
+    let hit = 0;
+    let cnt = 0;
+    for (let i = 0; i < N; i++) {
+      const tt = 0.06 + (0.88 * i) / (N - 1);
+      const px = a[0] + (b[0] - a[0]) * tt;
+      const py = a[1] + (b[1] - a[1]) * tt;
+      if (px < 3 || py < 3 || px > w - 4 || py > h - 4) continue; // sul bordo dell'immagine: nessuna prova
+      cnt++;
+      let best = 0;
+      for (const o of [-1.5, 0, 1.5]) {
+        const X = Math.round(px + nx * o);
+        const Y = Math.round(py + ny * o);
+        const j = Y * w + X;
+        best = Math.max(best, Math.abs(gx[j] * nx + gy[j] * ny));
+      }
+      if (best > 8) hit++;
+      const ix = Math.round(px - nx * 4); const iy = Math.round(py - ny * 4);
+      const ox = Math.round(px + nx * 4); const oy = Math.round(py + ny * 4);
+      if (ix >= 0 && iy >= 0 && ix < w && iy < h && ox >= 0 && oy >= 0 && ox < w && oy < h) {
+        conN++;
+        if (g[iy * w + ix] - g[oy * w + ox] > 5) con++;
+      }
+    }
+    sideE.push(cnt >= N * 0.5 ? hit / cnt : 0.3);
+  }
+  const meanE = sideE.reduce((s, v) => s + v, 0) / 4;
+  const minE = Math.min(...sideE);
+  const contrast = conN ? con / conN : 0;
+  return 0.5 * meanE + 0.15 * minE + 0.25 * contrast + 0.1 * Math.sqrt(Math.min(1, A));
+}
+
+function boxBlur(g, w, h, r) {
+  const t = new Float32Array(w * h);
+  const o = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    let acc = 0;
+    for (let x = -r; x <= r; x++) acc += g[y * w + Math.min(w - 1, Math.max(0, x))];
+    for (let x = 0; x < w; x++) {
+      t[y * w + x] = acc / (2 * r + 1);
+      acc += g[y * w + Math.min(w - 1, x + r + 1)] - g[y * w + Math.max(0, x - r)];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let acc = 0;
+    for (let y = -r; y <= r; y++) acc += t[Math.min(h - 1, Math.max(0, y)) * w + x];
+    for (let y = 0; y < h; y++) {
+      o[y * w + x] = acc / (2 * r + 1);
+      acc += t[Math.min(h - 1, y + r + 1) * w + x] - t[Math.max(0, y - r) * w + x];
+    }
+  }
+  return o;
 }

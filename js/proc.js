@@ -243,9 +243,9 @@ export function applyFilter(img, { filter = 'whiten', brightness = 0, contrast =
   for (let v = 0; v < 256; v++) {
     let x = v;
     if (filter === 'whiten' || filter === 'gray') {
-      // Bianco oltre 92%, inchiostro più pieno nei toni medi.
-      x = Math.min(1, v / 235);
-      x = 255 * Math.pow(x, 1.35);
+      // Carta bianca oltre il 91%, inchiostro pieno: i tratti sottili restano scuri invece di sbiadire.
+      x = Math.min(1, Math.max(0, (v / 255 - 0.1) / (0.91 - 0.1)));
+      x = 255 * Math.pow(x, 1.7);
     }
     x = (x - 128) * cf + 128 + brightness * 1.1;
     lut[v] = x;
@@ -277,6 +277,7 @@ export function applyFilter(img, { filter = 'whiten', brightness = 0, contrast =
       }
     }
     if (filter === 'bw') {
+      sharpen(img, 0.9);
       const hist = new Uint32Array(256);
       for (let i = 0; i < d.length; i += 4) hist[d[i]]++;
       let t = otsu(hist, w * h);
@@ -286,6 +287,21 @@ export function applyFilter(img, { filter = 'whiten', brightness = 0, contrast =
         const v = d[i];
         const o = v <= t - soft ? 0 : v >= t + soft ? 255 : ((v - (t - soft)) * 255) / (2 * soft);
         d[i] = d[i + 1] = d[i + 2] = o;
+      }
+    }
+  }
+
+  // Maschera di contrasto leggera sulla luminosità: contorni delle lettere più netti.
+  if (filter !== 'bw') sharpen(img, filter === 'original' ? 0.45 : 0.7);
+
+  // Filo di sfondo rimasto sui bordi (ritaglio non perfetto): con i filtri da documento diventa carta bianca.
+  if (filter !== 'original') {
+    const band = Math.max(2, Math.round(Math.min(w, h) * 0.006));
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (x >= band && x < w - band && y >= band && y < h - band) { x = w - band - 1; continue; }
+        const i = (y * w + x) * 4;
+        d[i] = d[i + 1] = d[i + 2] = 255;
       }
     }
   }
@@ -381,4 +397,31 @@ export function sharpness(gray, w, h) {
   if (!n) return 0;
   const m = s / n;
   return s2 / n - m * m;
+}
+
+// Maschera di contrasto (unsharp mask) con sfocatura 3×3: si aggiunge la differenza dalla luminosità sfocata.
+export function sharpen(img, amount) {
+  const { width: w, height: h, data: d } = img;
+  const L = new Float32Array(w * h);
+  for (let i = 0, j = 0; j < L.length; i += 4, j++) L[j] = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+  const T = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const o = y * w;
+    T[o] = (L[o] * 2 + L[o + 1]) / 3;
+    for (let x = 1; x < w - 1; x++) T[o + x] = (L[o + x - 1] + L[o + x] + L[o + x + 1]) / 3;
+    T[o + w - 1] = (L[o + w - 2] + L[o + w - 1] * 2) / 3;
+  }
+  for (let y = 0; y < h; y++) {
+    const a = y > 0 ? y - 1 : y;
+    const b = y < h - 1 ? y + 1 : y;
+    for (let x = 0; x < w; x++) {
+      const j = y * w + x;
+      const blur = (T[a * w + x] + T[j] + T[b * w + x]) / 3;
+      const delta = (L[j] - blur) * amount;
+      if (delta > -1 && delta < 1) continue;
+      const i = j * 4;
+      d[i] += delta; d[i + 1] += delta; d[i + 2] += delta;
+    }
+  }
+  return img;
 }

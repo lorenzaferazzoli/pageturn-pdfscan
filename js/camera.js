@@ -1,7 +1,7 @@
 // Fotocamera nell'app con riconoscimento della pagina e scatto automatico.
 import { detectQuad, frameDiff, quadDelta } from './detect.js';
 
-const AW = 220; // larghezza del fotogramma di analisi dal vivo
+const AW = 260; // larghezza del fotogramma di analisi dal vivo
 const SHOT_W = 400; // allo scatto si rifà il riconoscimento più preciso (piega del libro compresa)
 
 export class Camera {
