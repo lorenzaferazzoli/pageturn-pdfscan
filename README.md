@@ -17,7 +17,7 @@ Scanner di libri in PDF che gira nel browser del telefono. Niente app store, nie
 - **Pagina raddrizzata** con la correzione della prospettiva, angoli regolabili a mano.
 - **Sbiancamento:** carta bianca, ombra della piega e ingiallimento rimossi, inchiostro portato al nero pieno pagina per pagina, nitidezza regolabile su due scale. Filtri Originale, Sbianca, Grigi, B/N, con luminosità, contrasto e nitidezza.
 - **Libro aperto:** trova la piega tra le due pagine. Con lo scatto singolo tiene la pagina intera e scarta il pezzo dell'altra; con *Doppia pagina* ogni scatto diventa due pagine, divise lungo la piega.
-- **Angoli precisi:** due metodi insieme, la zona di carta più chiara e le linee dritte dei bordi (trasformata di Hough); vince il quadrilatero con più bordi veri sotto i lati. Funziona anche su sfondi chiari e disordinati, e un dito su un angolo non lo sposta. Poi ogni lato si rimisura in tanti punti su un'immagine più grande, per un bordo preciso; e il margine di una colonna di testo non viene scambiato per la piega del libro.
+- **Angoli precisi:** due metodi insieme, la zona di carta più chiara e le linee dritte dei bordi (trasformata di Hough); vince il quadrilatero con più bordi veri sotto i lati. Funziona anche su sfondi chiari e disordinati, e un dito su un angolo non lo sposta. Poi ogni lato si rimisura in tanti punti su un'immagine più grande, per un bordo preciso; e il margine di una colonna di testo non viene scambiato per la piega del libro. Se il modello di *Distendi* è già sul telefono, alla prima elaborazione di ogni pagina i bordi si rimisurano anche con UVDoc sulla foto intera: trova la pagina anche quando riempie quasi tutta l'inquadratura e accanto c'è l'altra pagina, poi i lati si agganciano al bordo vero della carta (qualche secondo in più a pagina, in background). I bordi sistemati a mano non vengono mai toccati.
 - **Ritaglio preciso:** angoli e lati interi trascinabili, con una lente di ingrandimento.
 - **Vista libera** a schermo intero con zoom e trascinamento, sulla pagina a piena risoluzione o sulla foto originale: per controllare se una foto è sfocata.
 - **Dividi** con una linea che parte sulla piega trovata e si può spostare e inclinare.
@@ -125,6 +125,7 @@ node tests/dewarp-check.mjs  # Distendi: quanto restano storte le righe sulle pa
 node tests/i18n.mjs          # traduzioni: niente italiano nelle schermate in inglese e cinese
 node tests/detect-check.mjs  # disegna il riconoscimento delle pagine su tests/out/
 node tests/detect-accuracy.mjs # riconoscimento: distanza tra gli angoli trovati e quelli veri
+node tests/detect-uv.mjs      # bordi rimisurati con UVDoc, dentro l'app
 python3 tests/make-detect-set.py # rigenera le foto di prova del riconoscimento
 python3 tests/make-curved.py # rigenera le pagine curve di prova
 npm run vendor               # dopo aver aggiornato le librerie

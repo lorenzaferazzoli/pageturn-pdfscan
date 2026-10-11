@@ -3,12 +3,12 @@ import * as queue from './queue.js';
 import * as sync from './sync.js';
 import { Camera } from './camera.js';
 import { icon } from './icons.js';
-import { renderPage, detectPage } from './jobs.js';
+import { renderPage, detectPage, detectPageUV } from './jobs.js';
 import { splitQuad, FULL_QUAD, homography } from './proc.js';
 import { ENGINES as OCR_ENGINES } from './ocr.js';
 import { tr, trp, sp, locale, setLang, langPref, LANGS } from './i18n.js';
 
-export const VERSION = '1.8.0';
+export const VERSION = '1.9.0';
 export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------
@@ -347,7 +347,10 @@ function pagesFor(blob, det, double) {
     const b = newPage(r, { origId: a.id });
     return [{ page: a, orig: blob }, { page: b, orig: null }];
   }
-  return [{ page: newPage(det ? det.quad : null), orig: blob }];
+  // pagina singola: i bordi si rimisurano con UVDoc durante l'elaborazione (vedi queue.js)
+  const page = newPage(det ? det.quad : null);
+  page.params.auto = true;
+  return [{ page, orig: blob }];
 }
 
 function toastProgress(msg) {
@@ -663,6 +666,7 @@ async function project() {
       else if (a === 'sdewarp') {
         const all = [...S.selected].every((id) => S.pages.get(id).params.dewarp);
         applyAll((pr) => { pr.erase = tagStrokes(pr.erase, pr.dewarp); pr.dewarp = !all; });
+        if (!all) db.kvSet('uvLoaded2', true);
         toast(all ? tr('Pagine non più distese') : tr('Distendo le pagine curve in background'), null, 2600);
       }
       else {
@@ -1459,13 +1463,16 @@ async function editor(pageId) {
       const k = c.dataset.c;
       if (k === 'detect') {
         await origP;
-        const r = await detectPage(orig);
-        if (r.found) { quad = r.found.quad; drawCrop(); } else toast(tr('Bordi non trovati: sistemali a mano'));
+        let found = null;
+        if (await queue.uvReady()) found = await detectPageUV(orig).catch(() => null);
+        if (!found) found = (await detectPage(orig)).found;
+        if (found) { quad = found.quad; drawCrop(); } else toast(tr('Bordi non trovati: sistemali a mano'));
       } else if (k === 'full') { quad = structuredClone(FULL_QUAD); drawCrop(); }
       else if (k === 'cancel') toView(!pvURL);
       else if (k === 'apply') {
         mark();
         params.quad = quad;
+        delete params.auto; // bordi scelti qui: non si rimisurano più da soli
         params.erase = []; // i tratti della gomma non corrispondono più
         dirty = true;
         toView(true);
@@ -1893,6 +1900,7 @@ async function editor(pageId) {
         { label: tr('Ripristina la foto originale'), icon: 'arrow-back-up', run: () => {
           mark();
           Object.assign(params, { quad: FULL_QUAD, rotation: 0, filter: 'original', brightness: 0, contrast: 0, sharpness: 50, erase: [], dewarp: false });
+          delete params.auto;
           dirty = true;
           toView(true);
         } },
@@ -1988,6 +1996,7 @@ async function editor(pageId) {
     const before = structuredClone(params);
     const [L, R] = splitByLine(params.quad || FULL_QUAD, params.rotation || 0, xt, xb);
     params.quad = L;
+    delete params.auto;
     params.erase = [];
     dirty = true;
     await commit();

@@ -17,7 +17,7 @@ A book scanner that turns pages into PDFs, running in your phone's browser. No a
 - **Straightened pages** with perspective correction and manually adjustable corners.
 - **Whitening:** white paper, with the gutter shadow and yellowing removed. Ink is brought to full black page by page, and sharpening works at two scales and is adjustable. Filters: Original, Whiten, Grayscale and B/W, each with brightness, contrast and sharpness.
 - **Open books:** finds the fold between the two pages. In single-page mode it keeps the whole page and discards the sliver of the facing one; in *Double page* mode every shot becomes two pages, split along the fold.
-- **Accurate corners:** two methods combined, the brightest paper region and the straight page edges (Hough transform). The quadrilateral with the most real edges under its sides wins. It works on light, cluttered backgrounds too, and a finger over a corner doesn't move it. Each side is then measured again at many points on a larger image for a precise edge, and the edge of a column of text is not mistaken for the fold of the book.
+- **Accurate corners:** two methods combined, the brightest paper region and the straight page edges (Hough transform). The quadrilateral with the most real edges under its sides wins. It works on light, cluttered backgrounds too, and a finger over a corner doesn't move it. Each side is then measured again at many points on a larger image for a precise edge, and the edge of a column of text is not mistaken for the fold of the book. If the *Unwarp* model is already on the phone, the first time each page is processed its edges are also measured with UVDoc on the whole photo: it finds the page even when it fills almost the whole frame with the facing page next to it, then the sides snap to the real edge of the paper (a few extra seconds per page, in the background). Edges you adjusted by hand are never touched.
 - **Precise cropping:** drag the corners or whole sides, with a magnifying loupe.
 - **Free view:** full screen with pinch zoom and panning, on the full-resolution page or the original photo, to check whether a shot is blurry.
 - **Split** with a line that starts on the detected fold and can be moved and tilted.
@@ -125,6 +125,7 @@ node tests/dewarp-check.mjs  # Unwarp: how crooked the lines stay on the curved 
 node tests/i18n.mjs          # translations: nothing left in Italian in the English and Chinese screens
 node tests/detect-check.mjs  # draws page detection results into tests/out/
 node tests/detect-accuracy.mjs # detection: distance between the corners found and the real ones
+node tests/detect-uv.mjs      # edges measured with UVDoc, inside the app
 python3 tests/make-detect-set.py # regenerates the detection test photos
 python3 tests/make-curved.py # regenerates the curved test pages
 npm run vendor               # after updating the libraries

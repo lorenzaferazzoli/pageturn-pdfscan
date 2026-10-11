@@ -82,3 +82,5 @@ const needsUV = (p) => !!p && (p.dewarp || (p.erase || []).some((s) => s.g === '
 export const renderPage = (blob, params, opts = {}) => call(opts.lane === 'bg' || needsUV(params) ? 'bg' : 'fg', 'render', blob, params, opts);
 export const resizeImage = (blob, opts) => call('bg', 'resize', blob, opts);
 export const detectPage = (blob) => call('fg', 'detect', blob);
+// con UVDoc: nella corsia di fondo, dove il modello di Distendi è già caricato
+export const detectPageUV = (blob) => call('bg', 'detectUV', blob);

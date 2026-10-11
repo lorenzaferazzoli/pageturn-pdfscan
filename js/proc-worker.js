@@ -1,6 +1,6 @@
-import { render, resize, detect } from './render.js';
+import { render, resize, detect, detectUV } from './render.js';
 
-const ops = { render, resize, detect };
+const ops = { render, resize, detect, detectUV };
 
 self.onmessage = async (e) => {
   const { id, op, args } = e.data;

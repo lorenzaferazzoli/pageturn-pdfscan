@@ -132,6 +132,7 @@ function finish(b, w, h, q, fill, spineSearch = true) {
   let quad = full;
   let halves = null;
   let spine = null;
+  const spineScore = sp ? sp.score : 0;
   if (sp) {
     spine = norm(sp.line);
     halves = [norm([q[0], sp.line[0], sp.line[1], q[3]]), norm([sp.line[0], q[1], q[2], sp.line[1]])];
@@ -139,7 +140,7 @@ function finish(b, w, h, q, fill, spineSearch = true) {
     if (sp.f < 0.42) quad = halves[1];
     else if (sp.f > 0.58) quad = halves[0];
   }
-  return { quad, full, spine, halves, score: Math.min(1, fill) };
+  return { quad, full, spine, halves, spineScore, score: Math.min(1, fill) };
 }
 
 // Bordo della regione: pixel della componente con almeno un vicino fuori.
@@ -333,7 +334,7 @@ function findSpine(g, w, h, q) {
   const yb = (half + v1) / 2;
   const slope = (ub - ut) / (yb - yt);
   const uAt = (v) => ut + (v - yt) * slope;
-  return { line: [map(uAt(0) + 0.5, 0), map(uAt(RH) + 0.5, RH)], f: (uAt(RH / 2) + 0.5) / RW };
+  return { line: [map(uAt(0) + 0.5, 0), map(uAt(RH) + 0.5, RH)], f: (uAt(RH / 2) + 0.5) / RW, score: bestScore };
 }
 
 function dilate(s, w, h) {
@@ -643,7 +644,7 @@ function boxBlur(g, w, h, r) {
 // esterno tra quelli netti), poi una retta robusta per tutti i punti. Per la piega del libro aperto si
 // cerca invece la linea d'ombra più scura. Se i punti non bastano o non sono d'accordo, il lato resta
 // com'era.
-export function refineDetection(gray, w, h, det) {
+export function refineDetection(gray, w, h, det, { out: OUT = 0.06, inn: INN = 0.025 } = {}) {
   if (!det || !det.full) return det;
   try {
     const g = boxBlur(boxBlur(gray, w, h, 1), w, h, 1);
@@ -666,8 +667,8 @@ export function refineDetection(gray, w, h, det) {
       const d = [(C[0] - A[0]) / len, (C[1] - A[1]) / len];
       let n = [-d[1], d[0]]; // verso l'interno
       if ((cx - A[0]) * n[0] + (cy - A[1]) * n[1] < 0) n = [-n[0], -n[1]];
-      const out = Math.round(diag * 0.06);
-      const inn = Math.round(diag * 0.025);
+      const out = Math.round(diag * OUT);
+      const inn = Math.round(diag * INN);
       const pts = [];
       const M = 48;
       for (let i = 0; i < M; i++) {
@@ -711,7 +712,7 @@ export function refineDetection(gray, w, h, det) {
     const RF = [];
     for (let k = 0; k < 4; k++) {
       const c = intersect(sideLine((k + 3) % 4), sideLine(k));
-      if (!c || Math.hypot(c[0] - F[k][0], c[1] - F[k][1]) > diag * 0.07) return det;
+      if (!c || Math.hypot(c[0] - F[k][0], c[1] - F[k][1]) > diag * (Math.max(OUT, INN) + 0.01)) return det;
       RF.push(c);
     }
     if (!convex(RF) || minAngle(RF) < 50) return det;
@@ -762,16 +763,115 @@ export function refineDetection(gray, w, h, det) {
 }
 
 // Retta per molti punti, togliendo quelli fuori posto; null se non sono abbastanza d'accordo.
-function robustLine(pts, M, diag) {
-  if (pts.length < Math.max(10, M * 0.4)) return null;
+function robustLine(pts, M, diag, T = [0.004, 0.002], need = [0.4, 0.35], min = 10) {
+  if (pts.length < Math.max(min, M * need[0])) return null;
   let sel = pts;
   let line = fitLine(sel);
-  for (const tol of [diag * 0.004, diag * 0.002]) {
+  for (const f of T) {
     const dist = (pt) => Math.abs((pt[0] - line.p[0]) * -line.d[1] + (pt[1] - line.p[1]) * line.d[0]);
-    const near = sel.filter((pt) => dist(pt) < Math.max(1.2, tol));
-    if (near.length < Math.max(10, M * 0.35)) return null;
+    const near = sel.filter((pt) => dist(pt) < Math.max(1.2, diag * f));
+    if (near.length < Math.max(min, M * need[1])) return null;
     line = fitLine(near);
     sel = near;
   }
   return line;
+}
+
+// ---------- bordi a partire da una stima (UVDoc) ----------
+// La stima di UVDoc è buona su tre lati, ma in basso scende spesso oltre la pagina (sul resto del
+// libro, sulla mano, sul pavimento). Per ogni lato, in 48 punti, si cerca lungo la perpendicolare il
+// bordo della carta (chiaro dentro, più scuro fuori), poi una retta robusta. Un bordo vale solo se la
+// striscia tra la stima e il bordo sta dalla parte giusta: rientrando, quello che si toglie non deve
+// essere carta (così le righe di testo e i titoli non contano); allargando, quello che si aggiunge
+// deve esserlo. Se un lato non si trova, resta quello della stima.
+export function snapQuad(gray, w, h, qn, { out: OUT = 0.03, inn: INN = 0.25 } = {}) {
+  const g = boxBlur(boxBlur(gray, w, h, 1), w, h, 1);
+  const F = qn.map(([x, y]) => [x * w, y * h]);
+  const diag = Math.hypot(w, h);
+  const cx = (F[0][0] + F[1][0] + F[2][0] + F[3][0]) / 4;
+  const cy = (F[0][1] + F[1][1] + F[2][1] + F[3][1]) / 4;
+  const at = (x, y) => {
+    if (x < 0 || y < 0 || x > w - 1.001 || y > h - 1.001) return -1;
+    const X = Math.floor(x); const Y = Math.floor(y); const fx = x - X; const fy = y - Y; const i = Y * w + X;
+    return (g[i] * (1 - fx) + g[i + 1] * fx) * (1 - fy) + (g[i + w] * (1 - fx) + g[i + w + 1] * fx) * fy;
+  };
+  const B = Math.max(4, Math.round(diag * 0.006));
+  const lines = [];
+  for (let k = 0; k < 4; k++) {
+    const A = F[k];
+    const C = F[(k + 1) % 4];
+    const len = Math.hypot(C[0] - A[0], C[1] - A[1]);
+    const d = [(C[0] - A[0]) / len, (C[1] - A[1]) / len];
+    let n = [-d[1], d[0]]; // verso l'interno
+    if ((cx - A[0]) * n[0] + (cy - A[1]) * n[1] < 0) n = [-n[0], -n[1]];
+    const out = Math.round(diag * OUT);
+    const inn = Math.round(diag * INN);
+    const off = out + B + 3;
+    const L = out + inn + 2 * B + 7;
+    const pts = [];
+    const M = 48;
+    for (let i = 0; i < M; i++) {
+      const t = 0.08 + (0.84 * i) / (M - 1);
+      const P = [A[0] + (C[0] - A[0]) * t, A[1] + (C[1] - A[1]) * t];
+      const prof = new Float32Array(L);
+      let first = 0; // i primi campioni possono cadere fuori dalla foto
+      let bad = false;
+      for (let j = 0; j < L; j++) {
+        const s = j - off;
+        const v = at(P[0] + n[0] * s, P[1] + n[1] * s);
+        if (v < 0) { if (s < 0) { first = j + 1; continue; } bad = true; break; }
+        prof[j] = v;
+      }
+      if (bad) continue;
+      const cs = new Float64Array(L + 1);
+      for (let j = 0; j < L; j++) cs[j + 1] = cs[j] + prof[j];
+      const mean = (a, b) => (cs[b + 1] - cs[a]) / (b - a + 1);
+      const E = new Float32Array(out + inn + 1);
+      for (let s = -out; s <= inn; s++) {
+        const j = s + off;
+        E[s + out] = j - 2 - B < first ? 0 : mean(j + 2, j + 1 + B) - mean(j - 1 - B, j - 2);
+      }
+      let best = null;
+      let bestE = 0;
+      for (let s = -out + 1; s < inn; s++) {
+        const e = E[s + out];
+        if (e < 12 || e < E[s + out - 1] || e < E[s + out + 1]) continue;
+        const j = s + off;
+        const mid = (mean(j + 2, j + 1 + B) + mean(j - 1 - B, j - 2)) / 2;
+        if (s > 3 && mean(off, j - 1) > mid) continue;
+        if (s < -3 && (j + 1 < first || mean(j + 1, off) < mid)) continue;
+        if (e > bestE) { bestE = e; best = s; }
+      }
+      if (best === null) continue;
+      const e0 = E[best + out - 1]; const e1 = E[best + out]; const e2 = E[best + out + 1];
+      const den = e0 - 2 * e1 + e2;
+      const sub = best + (den ? (0.5 * (e0 - e2)) / den : 0);
+      pts.push([P[0] + n[0] * sub, P[1] + n[1] * sub]);
+    }
+    // i bordi di una pagina di libro sono un po' curvi: tolleranza più larga che per la foto piatta
+    lines.push(robustLine(pts, M, diag, [0.01, 0.006, 0.004], [0.3, 0.3], 8) || { p: A, d });
+  }
+  const R = [];
+  for (let k = 0; k < 4; k++) {
+    const c = intersect(lines[(k + 3) % 4], lines[k]);
+    if (!c) return qn;
+    R.push(c);
+  }
+  if (!convex(R) || minAngle(R) < 45) return qn;
+  return R.map(([x, y]) => [Math.min(1, Math.max(0, x / w)), Math.min(1, Math.max(0, y / h))]);
+}
+
+// Libro aperto e piatto: una stima che prende tutte e due le pagine si taglia lungo la piega, e si
+// tiene la pagina intera come fa il riconoscimento classico. spine: [alto, basso] normalizzati.
+export function splitAtSpine(q, spine) {
+  if (!spine) return q;
+  const L = (a, b) => ({ p: a, d: [b[0] - a[0], b[1] - a[1]] });
+  const sp = L(spine[0], spine[1]);
+  const st = intersect(sp, L(q[0], q[1]));
+  const sb = intersect(sp, L(q[3], q[2]));
+  if (!st || !sb) return q;
+  const f = ((st[0] - q[0][0]) / (q[1][0] - q[0][0]) + (sb[0] - q[3][0]) / (q[2][0] - q[3][0])) / 2;
+  if (f > 0.1 && f < 0.42) return [st, q[1], q[2], sb];
+  if (f > 0.58 && f < 0.9) return [q[0], st, sb, q[3]];
+  return q;
 }

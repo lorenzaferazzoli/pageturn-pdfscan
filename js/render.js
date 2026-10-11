@@ -1,8 +1,8 @@
 // Dalla foto originale alla pagina finita. Funziona nel worker (OffscreenCanvas)
 // e, se serve, nel thread principale.
 import { warp, rotate, outputSize, applyFilter, toGray, sharpness, homography, FULL_QUAD } from './proc.js';
-import { uvInput, uvGrid, buildModel, renderModel, forward, inverse, IW, IH } from './dewarp.js';
-import { detectQuad, refineDetection } from './detect.js';
+import { uvInput, uvGrid, buildModel, renderModel, forward, inverse, IW, IH, GW, GH } from './dewarp.js';
+import { detectQuad, refineDetection, snapQuad, splitAtSpine } from './detect.js';
 
 function canvas(w, h) {
   if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h);
@@ -228,6 +228,88 @@ export async function detect(blob) {
     // bordi rimisurati su un'immagine più grande
     if (found) { const b = grayAt(1200); found = refineDetection(b.g, b.w, b.h, found); }
     return { found, width: bmp.width, height: bmp.height };
+  } finally {
+    release(bmp);
+  }
+}
+
+// ---------- la pagina nella foto ----------
+// Usata sulla foto intera, la griglia di UVDoc segue il bordo della pagina: dai suoi lati (i punti
+// centrali, dove la pagina è più dritta) si ricava un quadrilatero. Coordinate normalizzate 0..1.
+function gridQuad(G, W, H) {
+  const n = GW * GH;
+  const P = (i, j) => [G[i * GW + j] * W, G[n + i * GW + j] * H];
+  const fit = (pts) => {
+    let mx = 0; let my = 0;
+    for (const [x, y] of pts) { mx += x; my += y; }
+    mx /= pts.length; my /= pts.length;
+    let xx = 0; let yy = 0; let xy = 0;
+    for (const [x, y] of pts) { xx += (x - mx) ** 2; yy += (y - my) ** 2; xy += (x - mx) * (y - my); }
+    const th = 0.5 * Math.atan2(2 * xy, xx - yy);
+    return { p: [mx, my], d: [Math.cos(th), Math.sin(th)] };
+  };
+  const diag = Math.hypot(W, H);
+  const side = (all) => {
+    const pts = all.slice(Math.round(all.length * 0.1), Math.round(all.length * 0.9));
+    let L = fit(pts);
+    for (const tol of [0.01, 0.005]) {
+      const near = pts.filter(([x, y]) => Math.abs((x - L.p[0]) * -L.d[1] + (y - L.p[1]) * L.d[0]) < diag * tol);
+      if (near.length >= pts.length * 0.4) L = fit(near);
+    }
+    return L;
+  };
+  const inter = (a, b) => {
+    const det = a.d[0] * b.d[1] - a.d[1] * b.d[0];
+    if (Math.abs(det) < 1e-9) return null;
+    const t = ((b.p[0] - a.p[0]) * b.d[1] - (b.p[1] - a.p[1]) * b.d[0]) / det;
+    return [a.p[0] + t * a.d[0], a.p[1] + t * a.d[1]];
+  };
+  const top = side([...Array(GW)].map((_, j) => P(0, j)));
+  const bot = side([...Array(GW)].map((_, j) => P(GH - 1, j)));
+  const lef = side([...Array(GH)].map((_, i) => P(i, 0)));
+  const rig = side([...Array(GH)].map((_, i) => P(i, GW - 1)));
+  const q = [inter(top, lef), inter(top, rig), inter(bot, rig), inter(bot, lef)];
+  if (q.some((p) => !p)) return null;
+  return q.map(([x, y]) => [Math.min(1, Math.max(0, x / W)), Math.min(1, Math.max(0, y / H))]);
+}
+
+// Riconoscimento con UVDoc (quando il modello di Distendi c'è già): la rete guarda la foto intera e
+// trova la pagina anche quando riempie quasi tutta l'inquadratura e accanto c'è l'altra pagina;
+// poi i lati si agganciano al bordo vero della carta. Con il libro aperto e piatto si taglia lungo
+// la piega trovata dal riconoscimento classico.
+export async function detectUV(blob) {
+  const bmp = await decode(blob);
+  try {
+    const at = (side) => {
+      const k = Math.min(1, side / Math.max(bmp.width, bmp.height));
+      const c = canvas(Math.round(bmp.width * k), Math.round(bmp.height * k));
+      const x = ctx2d(c);
+      x.imageSmoothingQuality = 'high';
+      x.drawImage(bmp, 0, 0, c.width, c.height);
+      return x.getImageData(0, 0, c.width, c.height);
+    };
+    const gray = (img) => {
+      const g = new Uint8Array(img.width * img.height);
+      for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = (img.data[i] * 77 + img.data[i + 1] * 150 + img.data[i + 2] * 29) >> 8;
+      return g;
+    };
+    const img = at(1200);
+    const W = img.width;
+    const H = img.height;
+    const { ort, session } = await uvSession();
+    const { x, box } = uvInput(img, [[0, 0], [W, 0], [W, H], [0, H]]);
+    const r = await session.run({ [session.inputNames[0]]: new ort.Tensor('float32', x, [1, 3, IH, IW]) });
+    const q0 = gridQuad(uvGrid(r[session.outputNames[0]].data, box, W, H), W, H);
+    if (!q0) return null;
+    let quad = snapQuad(gray(img), W, H, q0);
+    const small = at(400);
+    const cd = detectQuad(gray(small), small.width, small.height);
+    // si taglia se il quadrilatero è largo come due pagine (una pagina sola è più alta che larga)
+    // oppure se la piega è netta: il margine di una colonna di testo, più debole, non deve tagliare
+    const len = (p, q) => Math.hypot((p[0] - q[0]) * W, (p[1] - q[1]) * H);
+    const wide = (len(quad[0], quad[1]) + len(quad[3], quad[2])) / (len(quad[0], quad[3]) + len(quad[1], quad[2]));
+    if (cd && cd.spine && (wide > 0.95 || cd.spineScore >= 1)) quad = splitAtSpine(quad, cd.spine);
+    return { quad };
   } finally {
     release(bmp);
   }
