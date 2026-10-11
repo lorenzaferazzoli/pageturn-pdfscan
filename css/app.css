@@ -265,6 +265,7 @@ button.li:active { background: var(--card-2); }
 .switch i::after { content: ''; position: absolute; left: 2px; top: 2px; width: 26px; height: 26px; border-radius: 50%; background: #fff; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); transition: transform 0.2s; }
 .switch input:checked + i { background: var(--success); }
 .switch input:checked + i::after { transform: translateX(20px); }
+.pform { margin: 0; }
 .sheet .actions { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
 .sheet .actions .btn { flex: none; }
 @keyframes fade { from { opacity: 0; } }

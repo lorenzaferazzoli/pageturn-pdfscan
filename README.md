@@ -17,7 +17,7 @@ Scanner di libri in PDF che gira nel browser del telefono. Niente app store, nie
 - **Pagina raddrizzata** con la correzione della prospettiva, angoli regolabili a mano.
 - **Sbiancamento:** carta bianca, ombra della piega e ingiallimento rimossi, inchiostro portato al nero pieno pagina per pagina, nitidezza regolabile su due scale. Filtri Originale, Sbianca, Grigi, B/N, con luminosità, contrasto e nitidezza.
 - **Libro aperto:** trova la piega tra le due pagine. Con lo scatto singolo tiene la pagina intera e scarta il pezzo dell'altra; con *Doppia pagina* ogni scatto diventa due pagine, divise lungo la piega.
-- **Angoli precisi:** due metodi insieme, la zona di carta più chiara e le linee dritte dei bordi (trasformata di Hough); vince il quadrilatero con più bordi veri sotto i lati. Funziona anche su sfondi chiari e disordinati, e un dito su un angolo non lo sposta.
+- **Angoli precisi:** due metodi insieme, la zona di carta più chiara e le linee dritte dei bordi (trasformata di Hough); vince il quadrilatero con più bordi veri sotto i lati. Funziona anche su sfondi chiari e disordinati, e un dito su un angolo non lo sposta. Poi ogni lato si rimisura in tanti punti su un'immagine più grande, per un bordo preciso; e il margine di una colonna di testo non viene scambiato per la piega del libro.
 - **Ritaglio preciso:** angoli e lati interi trascinabili, con una lente di ingrandimento.
 - **Vista libera** a schermo intero con zoom e trascinamento, sulla pagina a piena risoluzione o sulla foto originale: per controllare se una foto è sfocata.
 - **Dividi** con una linea che parte sulla piega trovata e si può spostare e inclinare.
@@ -28,7 +28,7 @@ Scanner di libri in PDF che gira nel browser del telefono. Niente app store, nie
 - **Avviso sulle foto mosse**, rotazione, riordino trascinando, riscatto di una singola pagina.
 - **Pagine curve:** lo strumento *Distendi* raddrizza le righe piegate vicino alla rilegatura, su una pagina o su tutte quelle selezionate. Il modello UVDoc stima la forma della pagina, l'app la trasforma in una superficie liscia (un foglio piegato verso la rilegatura, senza onde) e poi segue le righe di testo per raddrizzare quello che resta. La pagina si ricampiona dalla foto a piena risoluzione.
 - **OCR sul telefono** con due motori: *Preciso* (PaddleOCR PP-OCRv5, italiano, inglese e le altre lingue latine) e *Veloce* (Tesseract). Il PDF ha il testo ricercabile e selezionabile.
-- **Esportazione** in PDF (tre livelli di qualità) o in immagini JPEG, con salvataggio diretto su File, iCloud Drive, Google Drive o Dropbox dal menu Condividi.
+- **Esportazione** in PDF (tre livelli di qualità) o in immagini JPEG, di tutto il libro o solo delle pagine selezionate (*Seleziona* → *Esporta*), con salvataggio diretto su File, iCloud Drive, Google Drive o Dropbox dal menu Condividi.
 - **Leggera e veloce.** L'elaborazione gira in background: nelle prove 120 pagine vengono elaborate senza bloccare l'interfaccia.
 - **Tema chiaro e scuro**, automatico o scelto a mano.
 - **Italiano, inglese e cinese.** L'interfaccia segue la lingua del telefono, oppure si sceglie in *Impostazioni → Lingua*.
@@ -124,6 +124,8 @@ node tests/stabilizer.mjs    # stabilizzazione: ogni scatto deve risultare nitid
 node tests/dewarp-check.mjs  # Distendi: quanto restano storte le righe sulle pagine curve di prova
 node tests/i18n.mjs          # traduzioni: niente italiano nelle schermate in inglese e cinese
 node tests/detect-check.mjs  # disegna il riconoscimento delle pagine su tests/out/
+node tests/detect-accuracy.mjs # riconoscimento: distanza tra gli angoli trovati e quelli veri
+python3 tests/make-detect-set.py # rigenera le foto di prova del riconoscimento
 python3 tests/make-curved.py # rigenera le pagine curve di prova
 npm run vendor               # dopo aver aggiornato le librerie
 sh scripts/paddle-models.sh  # per riscaricare i modelli PaddleOCR

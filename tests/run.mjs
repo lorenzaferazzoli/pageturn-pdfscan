@@ -349,6 +349,29 @@ print(avg(0.31), avg(0.31 + 40 / ${box.height}))`]).toString().trim().split(' ')
   check(pages === 7, `PDF con 7 pagine (${pages})`);
   check(await page.evaluate(() => crossOriginIsolated), 'pagina isolata (OCR con più thread)');
 
+  // selezione: «Seleziona tutte» e esportazione delle sole pagine selezionate
+  await page.click('[data-a="select"]');
+  await page.waitForSelector('.th .check');
+  await page.click('[data-a="all"]');
+  const allN = await page.$$eval('.th.sel', (e) => e.length);
+  const allLabel = await page.textContent('[data-a="all"]');
+  await page.click('[data-a="all"]');
+  const noneN = await page.$$eval('.th.sel', (e) => e.length);
+  check(allN === 7 && noneN === 0 && /Deseleziona/.test(allLabel), `seleziona tutte e deseleziona (${allN}, poi ${noneN})`);
+  await page.click('.th >> nth=1');
+  await page.click('.th >> nth=3');
+  await page.click('[data-a="sexport"]');
+  await page.waitForSelector('#go');
+  const exTitle = await page.textContent('.sheet h2');
+  await page.click('#go');
+  await page.waitForSelector('text=PDF pronto', { timeout: 240000 });
+  const [dl4] = await Promise.all([page.waitForEvent('download'), page.click('[data-dl]')]);
+  const pdf4 = join(out, 'libro-selezione.pdf');
+  await dl4.saveAs(pdf4);
+  const p4 = +(execFileSync('pdfinfo', [pdf4]).toString().match(/Pages:\s+(\d+)/) || [])[1];
+  check(p4 === 2 && /Esporta 2 pagine/.test(exTitle) && /-p2_4\.pdf$/.test(dl4.suggestedFilename()), `PDF delle sole pagine selezionate (${p4} pagine, «${dl4.suggestedFilename()}»)`);
+  await page.click('[data-a="done"]');
+
   // formato A4 con margini
   await page.click('[data-a="export"]');
   await page.waitForSelector('#go');

@@ -17,7 +17,7 @@ A book scanner that turns pages into PDFs, running in your phone's browser. No a
 - **Straightened pages** with perspective correction and manually adjustable corners.
 - **Whitening:** white paper, with the gutter shadow and yellowing removed. Ink is brought to full black page by page, and sharpening works at two scales and is adjustable. Filters: Original, Whiten, Grayscale and B/W, each with brightness, contrast and sharpness.
 - **Open books:** finds the fold between the two pages. In single-page mode it keeps the whole page and discards the sliver of the facing one; in *Double page* mode every shot becomes two pages, split along the fold.
-- **Accurate corners:** two methods combined, the brightest paper region and the straight page edges (Hough transform). The quadrilateral with the most real edges under its sides wins. It works on light, cluttered backgrounds too, and a finger over a corner doesn't move it.
+- **Accurate corners:** two methods combined, the brightest paper region and the straight page edges (Hough transform). The quadrilateral with the most real edges under its sides wins. It works on light, cluttered backgrounds too, and a finger over a corner doesn't move it. Each side is then measured again at many points on a larger image for a precise edge, and the edge of a column of text is not mistaken for the fold of the book.
 - **Precise cropping:** drag the corners or whole sides, with a magnifying loupe.
 - **Free view:** full screen with pinch zoom and panning, on the full-resolution page or the original photo, to check whether a shot is blurry.
 - **Split** with a line that starts on the detected fold and can be moved and tilted.
@@ -28,7 +28,7 @@ A book scanner that turns pages into PDFs, running in your phone's browser. No a
 - **Blurry photo warning**, rotation, drag-to-reorder, and re-shooting a single page.
 - **Curved pages:** the *Unwarp* tool straightens lines bent near the binding, on one page or on all selected pages. The UVDoc model estimates the shape of the page; the app turns it into a smooth surface (a sheet curving towards the binding, with no ripples), then follows the lines of text to straighten whatever is left. The page is resampled from the full-resolution photo.
 - **On-device OCR** with two engines: *Accurate* (PaddleOCR PP-OCRv5; Italian, English and other Latin-script languages) and *Fast* (Tesseract). The PDF gets a searchable, selectable text layer.
-- **Export** to PDF (three quality levels) or JPEG images. From the Share menu you can save straight to Files, iCloud Drive, Google Drive or Dropbox.
+- **Export** to PDF (three quality levels) or JPEG images, for the whole book or only the selected pages (*Select* → *Export*). From the Share menu you can save straight to Files, iCloud Drive, Google Drive or Dropbox.
 - **Light and fast.** Processing runs in the background: in tests, 120 pages are processed without ever blocking the interface.
 - **Light and dark theme**, automatic or chosen by hand.
 - **Italian, English and Chinese.** The interface follows your phone's language, or you can pick one under *Settings → Language*.
@@ -124,6 +124,8 @@ node tests/stabilizer.mjs    # stabilization: every shot must come out sharp
 node tests/dewarp-check.mjs  # Unwarp: how crooked the lines stay on the curved test pages
 node tests/i18n.mjs          # translations: nothing left in Italian in the English and Chinese screens
 node tests/detect-check.mjs  # draws page detection results into tests/out/
+node tests/detect-accuracy.mjs # detection: distance between the corners found and the real ones
+python3 tests/make-detect-set.py # regenerates the detection test photos
 python3 tests/make-curved.py # regenerates the curved test pages
 npm run vendor               # after updating the libraries
 sh scripts/paddle-models.sh  # to download the PaddleOCR models again

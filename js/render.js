@@ -2,7 +2,7 @@
 // e, se serve, nel thread principale.
 import { warp, rotate, outputSize, applyFilter, toGray, sharpness, homography, FULL_QUAD } from './proc.js';
 import { uvInput, uvGrid, buildModel, renderModel, forward, inverse, IW, IH } from './dewarp.js';
-import { detectQuad } from './detect.js';
+import { detectQuad, refineDetection } from './detect.js';
 
 function canvas(w, h) {
   if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h);
@@ -210,16 +210,24 @@ export async function resize(blob, { maxSide = 1600, quality = 0.7, up = false }
 export async function detect(blob) {
   const bmp = await decode(blob);
   try {
-    const k = 400 / Math.max(bmp.width, bmp.height);
-    const w = Math.round(bmp.width * k);
-    const h = Math.round(bmp.height * k);
-    const c = canvas(w, h);
-    const x = ctx2d(c);
-    x.drawImage(bmp, 0, 0, w, h);
-    const d = x.getImageData(0, 0, w, h).data;
-    const g = new Uint8Array(w * h);
-    for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
-    return { found: detectQuad(g, w, h), width: bmp.width, height: bmp.height };
+    const grayAt = (side) => {
+      const k = Math.min(1, side / Math.max(bmp.width, bmp.height));
+      const w = Math.round(bmp.width * k);
+      const h = Math.round(bmp.height * k);
+      const c = canvas(w, h);
+      const x = ctx2d(c);
+      x.imageSmoothingQuality = 'high';
+      x.drawImage(bmp, 0, 0, w, h);
+      const d = x.getImageData(0, 0, w, h).data;
+      const g = new Uint8Array(w * h);
+      for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+      return { g, w, h };
+    };
+    const a = grayAt(400);
+    let found = detectQuad(a.g, a.w, a.h);
+    // bordi rimisurati su un'immagine più grande
+    if (found) { const b = grayAt(1200); found = refineDetection(b.g, b.w, b.h, found); }
+    return { found, width: bmp.width, height: bmp.height };
   } finally {
     release(bmp);
   }

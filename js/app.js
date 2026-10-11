@@ -8,7 +8,7 @@ import { splitQuad, FULL_QUAD, homography } from './proc.js';
 import { ENGINES as OCR_ENGINES } from './ocr.js';
 import { tr, trp, sp, locale, setLang, langPref, LANGS } from './i18n.js';
 
-export const VERSION = '1.7.0';
+export const VERSION = '1.8.0';
 export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------
@@ -98,20 +98,46 @@ function confirmSheet(title, text, ok, danger = false) {
   });
 }
 
+// Su iPhone:
+// - la tastiera si apre solo se il campo riceve il fuoco subito, dentro il tocco che apre il foglio
+//   (con un ritardo il campo resta «a metà» e non si riesce a scrivere);
+// - con la tastiera aperta il foglio sale sopra la tastiera, così «Salva» resta visibile;
+// - un tocco fuori dal foglio non lo chiude (con la tastiera che si abbassa finiva lì per sbaglio):
+//   si annulla con la X.
 function promptSheet(title, value, ok, placeholder = '') {
   return new Promise((resolve) => {
     let v = null;
+    let unfit = () => {};
     const s = sheet(
-      `${shead(title)}<div class="card"><div class="li"><input class="field full" type="text" value="${esc(value)}" placeholder="${esc(placeholder)}" enterkeyhint="done" maxlength="80"></div></div>
-       <div class="actions"><button class="btn primary" data-ok>${esc(ok)}</button></div>`,
-      { onClose: () => resolve(v) },
+      `${shead(title)}<form class="pform"><div class="card"><div class="li"><input class="field full" type="text" value="${esc(value)}" placeholder="${esc(placeholder)}" enterkeyhint="done" maxlength="80" autocomplete="off"></div></div>
+       <div class="actions"><button class="btn primary" type="submit" data-ok>${esc(ok)}</button></div></form>`,
+      { dismissable: false, onClose: () => { unfit(); resolve(v); } },
     );
     const inp = $('input', s.el);
-    const done = () => { v = inp.value.trim() || value; s.close(); };
-    $('[data-ok]', s.el).onclick = done;
-    inp.onkeydown = (e) => e.key === 'Enter' && done();
-    setTimeout(() => { inp.focus(); inp.select(); }, 250);
+    $('form', s.el).onsubmit = (e) => {
+      e.preventDefault();
+      v = inp.value.trim() || value;
+      inp.blur();
+      s.close();
+    };
+    inp.focus();
+    try { inp.setSelectionRange(0, inp.value.length); } catch { /* */ }
+    unfit = aboveKeyboard(s.el.parentElement);
   });
+}
+
+// Tiene un foglio dal basso sopra la tastiera del telefono (visualViewport). Ritorna la funzione che smette.
+function aboveKeyboard(wrap) {
+  const vv = window.visualViewport;
+  if (!vv) return () => {};
+  const fit = () => {
+    const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    wrap.style.paddingBottom = kb > 40 ? `${kb}px` : '';
+  };
+  vv.addEventListener('resize', fit);
+  vv.addEventListener('scroll', fit);
+  fit();
+  return () => { vv.removeEventListener('resize', fit); vv.removeEventListener('scroll', fit); };
 }
 
 function menuSheet(title, items) {
@@ -501,7 +527,7 @@ async function project() {
          <button class="iconbtn" data-a="select" aria-label="${tr('Seleziona')}">${icon('checkbox')}</button>
          <button class="iconbtn" data-a="menu" aria-label="${tr('Altro')}">${icon('dots')}</button></div>`
       : mode === 'select'
-        ? `<div class="side"><button class="link" data-a="all">${S.selected.size === pages.length && pages.length ? tr('Nessuna') : tr('Tutte')}</button></div>
+        ? `<div class="side"><button class="link" data-a="all">${S.selected.size === pages.length && pages.length ? tr('Deseleziona') : tr('Seleziona tutte')}</button></div>
            <div class="title">${S.selected.size ? plural(S.selected.size, 'selezionata', 'selezionate') : tr('Seleziona pagine')}</div>
            <div class="side r"><button class="link" data-a="done">${tr('Fine')}</button></div>`
         : `<div class="side"></div><div class="title">${tr('Riordina')}</div><div class="side r"><button class="link" data-a="done">${tr('Fine')}</button></div>`;
@@ -512,6 +538,7 @@ async function project() {
         ? `<div class="toolbar"><button class="tool" data-a="srotate">${icon('rotate-clockwise')}${tr('Ruota')}</button>
            <button class="tool" data-a="sfilter">${icon('adjustments-horizontal')}${tr('Filtro')}</button>
            <button class="tool" data-a="sdewarp">${icon('wave-sine')}${tr('Distendi')}</button>
+           <button class="tool" data-a="sexport">${icon('share-2')}${tr('Esporta')}</button>
            <button class="tool danger" data-a="sdelete">${icon('trash')}${tr('Elimina')}</button></div>`
         : `<div class="modehint" style="padding-bottom:calc(env(safe-area-inset-bottom) + 16px)">${tr('Tieni premuta una pagina e trascinala nella nuova posizione')}</div>`;
   const prevScroll = S.gridScroll || 0;
@@ -602,7 +629,11 @@ async function project() {
         } },
       ]);
     } else if (a === 'export') exportSheet();
-    else if (a === 'sdelete') {
+    else if (a === 'sexport') {
+      // solo le pagine selezionate, nell'ordine del libro
+      if (!S.selected.size) return toast(tr('Seleziona prima le pagine'));
+      exportSheet(P.order.filter((id) => S.selected.has(id)));
+    } else if (a === 'sdelete') {
       if (!S.selected.size) return toast(tr('Seleziona prima le pagine'));
       const n = S.selected.size;
       if (!(await confirmSheet(tr('Eliminare {pages}?', { pages: plural(n, 'pagina', 'pagine') }), tr('Le pagine verranno eliminate da questo dispositivo.'), tr('Elimina'), true))) return;
@@ -658,7 +689,7 @@ function updateSelection(el, pages) {
   const t = $('.nav .title', el);
   if (t) t.textContent = S.selected.size ? plural(S.selected.size, 'selezionata', 'selezionate') : tr('Seleziona pagine');
   const all = $('[data-a="all"]', el);
-  if (all) all.textContent = S.selected.size === pages.length && pages.length ? tr('Nessuna') : tr('Tutte');
+  if (all) all.textContent = S.selected.size === pages.length && pages.length ? tr('Deseleziona') : tr('Seleziona tutte');
 }
 
 // Ogni tratto della gomma ricorda su quale pagina è stato fatto (g: 'f' piatta, 'd' distesa):
@@ -1976,12 +2007,14 @@ async function editor(pageId) {
 // =====================================================================
 // ESPORTA
 // =====================================================================
-async function exportSheet() {
-  const P = S.project;
+// only: id delle pagine da esportare (le selezionate); senza, tutto il libro
+async function exportSheet(only) {
+  const pick = (proj) => (only ? { ...proj, order: proj.order.filter((id) => only.includes(id)) } : proj);
+  const P = pick(S.project);
   const E = await import('./export.js');
   const o = { kind: 'pdf', ocr: true, engine: 'paddle', ita: true, eng: true, quality: 'medium', size: 'image', ...(await db.kvGet('exportOpts', {})) };
   const st = sync.getState();
-  const s = sheet(`${shead(tr('Esporta'))}
+  const s = sheet(`${shead(only ? tr('Esporta {pages}', { pages: plural(P.order.length, 'pagina', 'pagine') }) : tr('Esporta'))}
     <div class="seg" id="kind"><button data-k="pdf">PDF</button><button data-k="img">${tr('Immagini')}</button></div>
     <div id="opts"></div>
     <div class="gl">${tr('Backup')}</div>
@@ -2031,7 +2064,7 @@ async function exportSheet() {
   s.el.addEventListener('click', async (e) => {
     const t = e.target.closest('[data-a]');
     if (!t) return;
-    if (t.dataset.a === 'backup') { s.close(); backupFlow(P); }
+    if (t.dataset.a === 'backup') { s.close(); backupFlow(S.project); }
     else if (t.dataset.a === 'server') { s.close(); settings(); }
   });
 
@@ -2051,8 +2084,10 @@ async function exportSheet() {
       if (t) t.textContent = text;
     };
     try {
-      await waitProcessing((left) => upd(0, tr('Finisco di elaborare le pagine ({n})…', { n: left })), ctrl.signal);
-      const fresh = await db.getProject(P.id);
+      await waitProcessing((left) => upd(0, tr('Finisco di elaborare le pagine ({n})…', { n: left })), ctrl.signal, P.order);
+      const fresh = pick(await db.getProject(P.id));
+      // nel nome del file, le pagine esportate (es. «libro-p3-7_10»)
+      const part = only ? `-p${pageRanges(S.project.order, only)}` : '';
       let blob;
       let name;
       if (o.kind === 'pdf') {
@@ -2063,10 +2098,10 @@ async function exportSheet() {
             else upd(o.ocr ? 0.85 + (done / total) * 0.15 : done / total, tr('Impagino: {i} di {n}', { i: done, n: total }));
           },
         });
-        name = `${E.slug(fresh.name)}.pdf`;
+        name = `${E.slug(fresh.name)}${part}.pdf`;
       } else {
         blob = await E.buildImagesZip(fresh, { quality: o.quality, onProgress: ({ done, total }) => upd(done / total, tr('Pagina {i} di {n}', { i: done + 1, n: total })) });
-        name = `${E.slug(fresh.name)}-${E.slug(tr('immagini'))}.zip`;
+        name = `${E.slug(fresh.name)}${part}-${E.slug(tr('immagini'))}.zip`;
       }
       if (ctrl.signal.aborted) return;
       prog.close();
@@ -2081,12 +2116,25 @@ async function exportSheet() {
   };
 }
 
-function waitProcessing(onLeft, signal) {
+// numeri di pagina in forma compatta: 3, 4, 5, 7 → «3-5_7»
+function pageRanges(order, ids) {
+  const nums = order.map((id, i) => (ids.includes(id) ? i + 1 : 0)).filter(Boolean);
+  const out = [];
+  for (let i = 0; i < nums.length; i++) {
+    let j = i;
+    while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
+    out.push(j > i ? `${nums[i]}-${nums[j]}` : `${nums[i]}`);
+    i = j;
+  }
+  return out.join('_');
+}
+
+function waitProcessing(onLeft, signal, order = S.project.order) {
   return new Promise((resolve, reject) => {
     const check = async () => {
       if (signal.aborted) return reject(new DOMException('annullato', 'AbortError'));
       const pages = await db.getPages(S.project.id);
-      const left = S.project.order.filter((id) => pages.get(id) && pages.get(id).status === 'pending').length;
+      const left = order.filter((id) => pages.get(id) && pages.get(id).status === 'pending').length;
       if (!left) return resolve();
       onLeft(left);
       queue.resume();

@@ -261,9 +261,33 @@ function findSpine(g, w, h, q) {
     for (let v = v0; v < v1; v++) s += r[v * RW + u];
     lum[u] = s / (v1 - v0);
   }
+  // Luminosità della sola carta per colonna (un percentile alto: il testo non conta).
+  const pap = new Float32Array(RW);
+  const col = new Float32Array(v1 - v0);
+  for (let u = 0; u < RW; u++) {
+    for (let v = v0; v < v1; v++) col[v - v0] = r[v * RW + u];
+    col.sort();
+    pap[u] = col[Math.floor(col.length * 0.92)];
+  }
   const lo = Math.round(RW * 0.06);
   const hi = Math.round(RW * 0.94);
   const win = Math.round(RW * 0.1);
+  // salto della carta in u (le due pagine prendono luce diversa), al netto di una luce che cala
+  // piano piano da un lato all'altro: quattro tratti accanto (a b | c d), il salto tra b e c meno
+  // la pendenza dei tratti esterni
+  const med = (a, b) => {
+    const v = [];
+    for (let k = Math.max(0, a); k <= Math.min(RW - 1, b); k++) v.push(pap[k]);
+    v.sort((x, y) => x - y);
+    return v.length ? v[v.length >> 1] : 0;
+  };
+  const paperJump = (u) => {
+    const a = med(u - 13, u - 8);
+    const b = med(u - 7, u - 2);
+    const c = med(u + 2, u + 7);
+    const d = med(u + 8, u + 13);
+    return Math.abs(c - b - (b - a + (d - c)) / 2);
+  };
   let best = -1;
   let bestScore = 0;
   for (let u = lo; u <= hi; u++) {
@@ -279,9 +303,13 @@ function findSpine(g, w, h, q) {
     const bt = nb(cBot);
     const b2 = cBot[u];
     const tt = nb(cTop);
-    const edge = (t > 0.55 && bt > 0.5) || (b2 > 0.55 && tt > 0.5)
-      // bordo molto netto in una metà e debole nell'altra: vale solo se le due parti hanno luminosità diversa
-      || (step > 5 && ((t > 0.8 && bt > 0.3) || (b2 > 0.8 && tt > 0.3)));
+    // Un bordo continuo da solo non basta: anche il margine di una colonna di testo giustificato è
+    // netto e continuo dall'alto in basso. La piega in più ha una linea d'ombra (valle), oppure un
+    // bordo nettissimo in tutte e due le metà, oppure carta di luce diversa ai due lati.
+    const cont = (t > 0.55 && bt > 0.5) || (b2 > 0.55 && tt > 0.5);
+    const strong = (t >= 0.85 && bt >= 0.85) || (b2 >= 0.85 && tt >= 0.85);
+    const oneSide = step > 5 && ((t > 0.8 && bt > 0.3) || (b2 > 0.8 && tt > 0.3));
+    const edge = (cont || oneSide) && (valley >= 6.5 || strong || paperJump(u) > 14);
     const ok = edge || (valley > 14 && cAll[u] > 0.3);
     if (!ok) continue;
     const score = Math.max(t + bt, b2 + tt) / 2 + valley / 40;
@@ -607,4 +635,143 @@ function boxBlur(g, w, h, r) {
     }
   }
   return o;
+}
+
+// ---------- rifinitura su un'immagine più grande ----------
+// Il riconoscimento lavora a 400 px. Qui ogni lato si rimisura su un'immagine più grande (circa 1200 px)
+// in tanti punti: per ciascuno si cerca, lungo la perpendicolare, dove la carta finisce (il bordo più
+// esterno tra quelli netti), poi una retta robusta per tutti i punti. Per la piega del libro aperto si
+// cerca invece la linea d'ombra più scura. Se i punti non bastano o non sono d'accordo, il lato resta
+// com'era.
+export function refineDetection(gray, w, h, det) {
+  if (!det || !det.full) return det;
+  try {
+    const g = boxBlur(boxBlur(gray, w, h, 1), w, h, 1);
+    const px = (q) => q.map(([x, y]) => [x * w, y * h]);
+    const F = px(det.full);
+    const diag = Math.hypot(w, h);
+    const cx = (F[0][0] + F[1][0] + F[2][0] + F[3][0]) / 4;
+    const cy = (F[0][1] + F[1][1] + F[2][1] + F[3][1]) / 4;
+    const at = (x, y) => {
+      if (x < 0 || y < 0 || x > w - 1.001 || y > h - 1.001) return -1;
+      const X = Math.floor(x); const Y = Math.floor(y); const fx = x - X; const fy = y - Y; const i = Y * w + X;
+      return (g[i] * (1 - fx) + g[i + 1] * fx) * (1 - fy) + (g[i + w] * (1 - fx) + g[i + w + 1] * fx) * fy;
+    };
+    const B = Math.max(4, Math.round(diag * 0.006));
+    const lines = [];
+    for (let k = 0; k < 4; k++) {
+      const A = F[k];
+      const C = F[(k + 1) % 4];
+      const len = Math.hypot(C[0] - A[0], C[1] - A[1]);
+      const d = [(C[0] - A[0]) / len, (C[1] - A[1]) / len];
+      let n = [-d[1], d[0]]; // verso l'interno
+      if ((cx - A[0]) * n[0] + (cy - A[1]) * n[1] < 0) n = [-n[0], -n[1]];
+      const out = Math.round(diag * 0.06);
+      const inn = Math.round(diag * 0.025);
+      const pts = [];
+      const M = 48;
+      for (let i = 0; i < M; i++) {
+        const t = 0.08 + (0.84 * i) / (M - 1);
+        const P = [A[0] + (C[0] - A[0]) * t, A[1] + (C[1] - A[1]) * t];
+        // profilo lungo la normale: s < 0 verso l'esterno
+        const prof = new Float32Array(out + inn + 2 * B + 6);
+        let okp = true;
+        for (let j = 0; j < prof.length; j++) {
+          const s = j - out - B - 3;
+          const v = at(P[0] + n[0] * s, P[1] + n[1] * s);
+          if (v < 0) { okp = false; break; }
+          prof[j] = v;
+        }
+        if (!okp) continue; // lato sul bordo della foto: non c'è niente da misurare
+        const cs = new Float32Array(prof.length + 1);
+        for (let j = 0; j < prof.length; j++) cs[j + 1] = cs[j] + prof[j];
+        const mean = (a, b) => (cs[b + 1] - cs[a]) / (b - a + 1);
+        const E = new Float32Array(out + inn + 1);
+        let emax = 0;
+        for (let s = -out; s <= inn; s++) {
+          const j = s + out + B + 3;
+          const e = mean(j + 2, j + 1 + B) - mean(j - 1 - B, j - 2);
+          E[s + out] = e;
+          if (e > emax) emax = e;
+        }
+        if (emax < 12) continue;
+        // il bordo più esterno tra quelli forti (il testo e le ombre stanno dentro la pagina)
+        let best = -1;
+        for (let s = 1; s < E.length - 1; s++) {
+          if (E[s] >= Math.max(12, emax * 0.55) && E[s] >= E[s - 1] && E[s] >= E[s + 1]) { best = s; break; }
+        }
+        if (best < 0) continue;
+        const den = E[best - 1] - 2 * E[best] + E[best + 1];
+        const sub = best - out + (den ? (0.5 * (E[best - 1] - E[best + 1])) / den : 0);
+        pts.push([P[0] + n[0] * sub, P[1] + n[1] * sub]);
+      }
+      lines.push(robustLine(pts, M, diag));
+    }
+    const sideLine = (k) => lines[k] || { p: F[k], d: [F[(k + 1) % 4][0] - F[k][0], F[(k + 1) % 4][1] - F[k][1]].map((v, _, a) => v / Math.hypot(...a)) };
+    const RF = [];
+    for (let k = 0; k < 4; k++) {
+      const c = intersect(sideLine((k + 3) % 4), sideLine(k));
+      if (!c || Math.hypot(c[0] - F[k][0], c[1] - F[k][1]) > diag * 0.07) return det;
+      RF.push(c);
+    }
+    if (!convex(RF) || minAngle(RF) < 50) return det;
+    const norm = (q) => q.map(([x, y]) => [Math.min(1, Math.max(0, x / w)), Math.min(1, Math.max(0, y / h))]);
+    const full = norm(RF);
+    if (!det.spine) return { ...det, full, quad: det.quad === det.full ? full : full };
+    // la piega: linea d'ombra più scura vicino a quella trovata
+    const S = px(det.spine);
+    const topL = sideLine(0);
+    const botL = sideLine(2);
+    const sd = [S[1][0] - S[0][0], S[1][1] - S[0][1]];
+    const sl = Math.hypot(...sd);
+    const sn = [-sd[1] / sl, sd[0] / sl];
+    const W = Math.round(diag * 0.03);
+    const R = Math.max(3, Math.round(diag * 0.004));
+    const spts = [];
+    const MS = 32;
+    for (let i = 0; i < MS; i++) {
+      const t = 0.1 + (0.8 * i) / (MS - 1);
+      const P = [S[0][0] + sd[0] * t, S[0][1] + sd[1] * t];
+      let bestV = 0;
+      let bestS = null;
+      for (let s = -W; s <= W; s++) {
+        const c0 = at(P[0] + sn[0] * s, P[1] + sn[1] * s);
+        if (c0 < 0) { bestS = null; break; }
+        let l = 0; let r = 0;
+        for (let j = R; j < 3 * R; j++) {
+          l += at(P[0] + sn[0] * (s - j), P[1] + sn[1] * (s - j));
+          r += at(P[0] + sn[0] * (s + j), P[1] + sn[1] * (s + j));
+        }
+        const v = Math.min(l, r) / (2 * R) - c0;
+        if (v > bestV) { bestV = v; bestS = s; }
+      }
+      if (bestS !== null && bestV >= 6) spts.push([P[0] + sn[0] * bestS, P[1] + sn[1] * bestS]);
+    }
+    const spl = robustLine(spts, MS, diag) || { p: S[0], d: [sd[0] / sl, sd[1] / sl] };
+    const st = intersect(spl, topL);
+    const sb = intersect(spl, botL);
+    if (!st || !sb) return { ...det, full };
+    const spine = norm([st, sb]);
+    const halves = [norm([RF[0], st, sb, RF[3]]), norm([st, RF[1], RF[2], sb])];
+    const same = (a, b) => a && b && a.every((p, i) => Math.abs(p[0] - b[i][0]) < 1e-9 && Math.abs(p[1] - b[i][1]) < 1e-9);
+    const quad = det.halves && same(det.quad, det.halves[0]) ? halves[0] : det.halves && same(det.quad, det.halves[1]) ? halves[1] : full;
+    return { ...det, full, spine, halves, quad };
+  } catch {
+    return det;
+  }
+}
+
+// Retta per molti punti, togliendo quelli fuori posto; null se non sono abbastanza d'accordo.
+function robustLine(pts, M, diag) {
+  if (pts.length < Math.max(10, M * 0.4)) return null;
+  let sel = pts;
+  let line = fitLine(sel);
+  for (const tol of [diag * 0.004, diag * 0.002]) {
+    const dist = (pt) => Math.abs((pt[0] - line.p[0]) * -line.d[1] + (pt[1] - line.p[1]) * line.d[0]);
+    const near = sel.filter((pt) => dist(pt) < Math.max(1.2, tol));
+    if (near.length < Math.max(10, M * 0.35)) return null;
+    line = fitLine(near);
+    sel = near;
+  }
+  return line;
 }

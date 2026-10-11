@@ -1,5 +1,5 @@
 // Fotocamera nell'app con riconoscimento della pagina e scatto automatico.
-import { detectQuad, frameDiff, quadDelta } from './detect.js';
+import { detectQuad, refineDetection, frameDiff, quadDelta } from './detect.js';
 import { sharpness } from './proc.js';
 
 const AW = 220; // larghezza del fotogramma di analisi dal vivo
@@ -229,7 +229,20 @@ export class Camera {
       const d = sx.getImageData(0, 0, s.width, s.height).data;
       const g = new Uint8Array(s.width * s.height);
       for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
-      const det = detectQuad(g, s.width, s.height) || (quad ? { quad, full: quad, halves: null, spine: null } : null);
+      let det = detectQuad(g, s.width, s.height);
+      // bordi rimisurati in tanti punti su un'immagine più grande dello stesso fotogramma
+      if (det) {
+        const kb = Math.min(1, 1200 / Math.max(c.width, c.height));
+        s.width = Math.round(c.width * kb);
+        s.height = Math.round(c.height * kb);
+        sx.imageSmoothingQuality = 'high';
+        sx.drawImage(c, 0, 0, s.width, s.height);
+        const db = sx.getImageData(0, 0, s.width, s.height).data;
+        const gb = new Uint8Array(s.width * s.height);
+        for (let i = 0, j = 0; j < gb.length; i += 4, j++) gb[j] = (db[i] * 77 + db[i + 1] * 150 + db[i + 2] * 29) >> 8;
+        det = refineDetection(gb, s.width, s.height, det);
+      }
+      det = det || (quad ? { quad, full: quad, halves: null, spine: null } : null);
       const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.92));
       c.width = c.height = 0; // libera la memoria subito (Safari)
       this.lastShotGray = gray || (this.grabSmall() || {}).g;
