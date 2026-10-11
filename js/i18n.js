@@ -24,6 +24,8 @@ export const T = {
   'selezionata|selezionate': [['{n} selected', '{n} selected'], ['已选 {n} 页', '已选 {n} 页']],
   'pagina eliminata|pagine eliminate': [['{n} page deleted', '{n} pages deleted'], ['已删除 {n} 页', '已删除 {n} 页']],
   'foto importata|foto importate': [['{n} photo imported', '{n} photos imported'], ['已导入 {n} 张照片', '已导入 {n} 张照片']],
+  'libro|libri': [['{n} book', '{n} books'], ['{n} 本书', '{n} 本书']],
+  'libro selezionato|libri selezionati': [['{n} selected', '{n} selected'], ['已选 {n} 本', '已选 {n} 本']],
 
   // fogli e messaggi comuni
   'Chiudi': ['Close', '关闭'],
@@ -67,6 +69,8 @@ export const T = {
   'Preparo il backup…': ['Preparing backup…', '正在准备备份…'],
   'Backup pronto': ['Backup ready', '备份已就绪'],
   'Backup non riuscito: {e}': ['Backup failed: {e}', '备份失败：{e}'],
+  'Seleziona libri': ['Select books', '选择书籍'],
+  'Tocca i libri nell’ordine in cui li vuoi nel file.': ['Tap the books in the order you want them in the file.', '按你希望它们在文件中出现的顺序点按书籍。'],
 
   // libro
   'errore': ['error', '错误'],

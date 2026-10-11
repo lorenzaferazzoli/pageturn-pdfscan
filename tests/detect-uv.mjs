@@ -16,6 +16,7 @@ const check = (ok, msg) => { console.log(`${ok ? '✓' : '✗'} ${msg}`); if (!o
 
 const sets = [{ name: 'sintetiche', dir: 'tests/fixtures/detect' }];
 if (existsSync(join(root, 'tests/fixtures/real/libri/quads.json'))) sets.push({ name: 'foto vere', dir: 'tests/fixtures/real/libri' });
+if (process.env.ONLY) sets.splice(0, sets.length, ...sets.filter((s) => s.name.includes(process.env.ONLY)));
 
 const PORT = 8094;
 const server = spawn('node', ['server/server.js'], { cwd: root, env: { ...process.env, PORT, DATA_DIR: join(out, 'data-uv') }, stdio: 'ignore' });
@@ -66,6 +67,7 @@ try {
     const params = await importAll(names.map((n) => join(root, set.dir, `${n}.jpg`)));
     const v = names.map((n, i) => iou(params[i].quad, gt[n].map(([x, y]) => [Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))])));
     names.forEach((n, i) => console.log(`  ${n.padEnd(26)} ${v[i].toFixed(3)}`));
+    writeFileSync(join(out, `uv-${set.dir.split('/').pop()}.json`), JSON.stringify(Object.fromEntries(names.map((n, i) => [n, { quad: params[i].quad, iou: v[i] }]))));
     const med = [...v].sort((a, b) => a - b)[v.length >> 1];
     console.log(`  ${set.name}: ${names.length} foto in ${Math.round((Date.now() - t0) / 1000)} s`);
     check(params.every((p) => !p.auto), `${set.name}: bordi rimisurati una volta sola`);

@@ -8,7 +8,7 @@ import { splitQuad, FULL_QUAD, homography } from './proc.js';
 import { ENGINES as OCR_ENGINES } from './ocr.js';
 import { tr, trp, sp, locale, setLang, langPref, LANGS } from './i18n.js';
 
-export const VERSION = '1.9.0';
+export const VERSION = '1.10.0';
 export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------
@@ -257,6 +257,7 @@ const S = {
   select: false,
   reorder: false,
   selected: new Set(),
+  books: null, // libri scelti nella home per esportarli insieme, nell'ordine in cui sono stati toccati
   cleanup: null,
 };
 
@@ -382,22 +383,33 @@ async function home() {
   S.project = null;
   const projects = await db.listProjects();
   const hideBanner = await db.kvGet('hideInstall', false);
+  if (S.books) S.books = S.books.filter((id) => projects.some((p) => p.id === id));
+  const sel = S.books;
+  const selTitle = () => (S.books.length ? plural(S.books.length, 'libro selezionato', 'libri selezionati') : tr('Seleziona libri'));
+  const goLabel = () => `${icon('share-2')} ${S.books.length > 1 ? tr('Esporta {pages}', { pages: plural(S.books.length, 'libro', 'libri') }) : tr('Esporta')}`;
   const el = show(`
-    <div class="nav"><div class="side"></div><div class="title"></div>
-      <div class="side r"><button class="iconbtn" data-a="settings" aria-label="${tr('Impostazioni')}">${icon('settings')}</button></div></div>
+    <div class="nav">${sel
+      ? `<div class="side"></div><div class="title" id="htitle">${selTitle()}</div><div class="side r"><button class="link" data-a="hdone">${tr('Fine')}</button></div>`
+      : `<div class="side"></div><div class="title"></div>
+      <div class="side r">${projects.length ? `<button class="iconbtn" data-a="hselect" aria-label="${tr('Seleziona')}">${icon('checkbox')}</button>` : ''}<button class="iconbtn" data-a="settings" aria-label="${tr('Impostazioni')}">${icon('settings')}</button></div>`}</div>
     <div class="scroll">
-      <div class="head"><h1 class="large">Pageturn</h1></div>
-      ${!standalone && !hideBanner ? `<div class="banner">${icon('device-floppy')}<div><b>${tr('Aggiungi Pageturn alla schermata Home')}</b>
+      <div class="head"><h1 class="large">Pageturn</h1>${sel ? `<div class="status">${tr('Tocca i libri nell’ordine in cui li vuoi nel file.')}</div>` : ''}</div>
+      ${!sel && !standalone && !hideBanner ? `<div class="banner">${icon('device-floppy')}<div><b>${tr('Aggiungi Pageturn alla schermata Home')}</b>
         ${isIOS ? tr('Dal pulsante Condividi del browser (Safari, Opera, Chrome…) scegli «Aggiungi alla schermata Home».') : tr('Installa l’app dal menu del browser.')}${sp()}${tr('Così le scansioni non vengono cancellate dal browser.')}</div><button class="x" data-a="hidebanner" aria-label="${tr('Nascondi')}">${icon('x')}</button></div>` : ''}
-      ${projects.length ? `<div class="group">${projects.map((p) => `
-        <div class="proj" data-a="open" data-id="${p.id}" role="button" tabindex="0">
+      ${projects.length ? `<div class="group">${projects.map((p) => {
+        const k = sel ? sel.indexOf(p.id) : -1;
+        return `
+        <div class="proj ${k >= 0 ? 'sel' : ''}" data-a="open" data-id="${p.id}" role="button" tabindex="0">
           <div class="cover" data-cover="${p.order[0] || ''}">${icon('book-2')}</div>
           <div class="meta"><div class="name">${esc(p.name)}</div><div class="sub">${plural(p.order.length, 'pagina', 'pagine')} · ${ago(p.updated)}</div></div>
-          <button class="more" data-a="pmenu" data-id="${p.id}" aria-label="${tr('Opzioni')}">${icon('dots')}</button>
-        </div>`).join('')}</div>`
+          ${sel ? `<span class="ord ${k >= 0 ? 'on' : ''}" data-ord>${k >= 0 ? k + 1 : ''}</span>` : `<button class="more" data-a="pmenu" data-id="${p.id}" aria-label="${tr('Opzioni')}">${icon('dots')}</button>`}
+        </div>`;
+      }).join('')}</div>`
         : `<div class="empty"><div class="big">${icon('book')}</div><h2>${tr('Inizia il tuo primo libro')}</h2><p>${tr('Ogni pagina viene salvata appena la scatti, anche se l’app si chiude.')}</p></div>`}
     </div>
-    <div class="bar"><button class="btn primary" data-a="new">${icon('plus')} ${tr('Nuovo libro')}</button></div>`);
+    <div class="bar">${sel
+      ? `<button class="btn primary" data-a="hexport" ${sel.length ? '' : 'disabled'}>${goLabel()}</button>`
+      : `<button class="btn primary" data-a="new">${icon('plus')} ${tr('Nuovo libro')}</button>`}</div>`);
 
   // copertine
   for (const c of $$('[data-cover]', el)) {
@@ -411,6 +423,21 @@ async function home() {
     });
   }
 
+  // selezione dei libri: numeri aggiornati sul posto, senza ridisegnare le copertine
+  const refresh = () => {
+    for (const r of $$('.proj', el)) {
+      const k = S.books.indexOf(r.dataset.id);
+      r.classList.toggle('sel', k >= 0);
+      const o = $('[data-ord]', r);
+      o.classList.toggle('on', k >= 0);
+      o.textContent = k >= 0 ? k + 1 : '';
+    }
+    $('#htitle', el).textContent = selTitle();
+    const go = $('[data-a="hexport"]', el);
+    go.disabled = !S.books.length;
+    go.innerHTML = goLabel();
+  };
+
   el.onclick = async (e) => {
     const t = e.target.closest('[data-a]');
     if (!t) return;
@@ -422,9 +449,24 @@ async function home() {
       const p = await db.createProject(name || tr('Libro del {d}', { d }));
       await loadProject(p.id);
       camera();
+    } else if (a === 'open' && S.books) {
+      const k = S.books.indexOf(t.dataset.id);
+      if (k >= 0) S.books.splice(k, 1);
+      else S.books.push(t.dataset.id);
+      refresh();
     } else if (a === 'open') {
       await loadProject(t.dataset.id);
       project();
+    } else if (a === 'hselect') {
+      S.books = [];
+      home();
+    } else if (a === 'hdone') {
+      S.books = null;
+      home();
+    } else if (a === 'hexport') {
+      const books = (await Promise.all(S.books.map((id) => db.getProject(id)))).filter(Boolean);
+      if (!books.some((b) => b.order.length)) return toast(tr('Nessuna pagina'));
+      exportSheet(null, books);
     } else if (a === 'pmenu') {
       e.stopPropagation();
       const p = await db.getProject(t.dataset.id);
@@ -2016,22 +2058,26 @@ async function editor(pageId) {
 // =====================================================================
 // ESPORTA
 // =====================================================================
-// only: id delle pagine da esportare (le selezionate); senza, tutto il libro
-async function exportSheet(only) {
+// only: id delle pagine da esportare (le selezionate); senza, tutto il libro.
+// books: più libri in un file solo, nell'ordine in cui sono stati scelti nella home.
+async function exportSheet(only, books) {
   const pick = (proj) => (only ? { ...proj, order: proj.order.filter((id) => only.includes(id)) } : proj);
-  const P = pick(S.project);
+  const join = (list) => ({ id: null, parts: list, name: list.map((b) => b.name).join(' + '), order: list.flatMap((b) => b.order) });
+  const P = books ? join(books) : pick(S.project);
   const E = await import('./export.js');
   const o = { kind: 'pdf', ocr: true, engine: 'paddle', ita: true, eng: true, quality: 'medium', size: 'image', ...(await db.kvGet('exportOpts', {})) };
   const st = sync.getState();
-  const s = sheet(`${shead(only ? tr('Esporta {pages}', { pages: plural(P.order.length, 'pagina', 'pagine') }) : tr('Esporta'))}
+  const title = books ? (books.length > 1 ? tr('Esporta {pages}', { pages: plural(books.length, 'libro', 'libri') }) : tr('Esporta'))
+    : only ? tr('Esporta {pages}', { pages: plural(P.order.length, 'pagina', 'pagine') }) : tr('Esporta');
+  const s = sheet(`${shead(title)}
     <div class="seg" id="kind"><button data-k="pdf">PDF</button><button data-k="img">${tr('Immagini')}</button></div>
     <div id="opts"></div>
-    <div class="gl">${tr('Backup')}</div>
+    ${books ? '' : `<div class="gl">${tr('Backup')}</div>
     <div class="card">
       <div class="li"><span>${tr('Ultimo backup')}</span><span class="r">${ago(P.lastBackup)}</span></div>
       <button class="li accent" data-a="backup"><span>${tr('Esporta progetto (.zip)')}</span>${icon('download')}</button>
       <button class="li" data-a="server"><span>${tr('Backup automatico')}</span><span class="r">${st.status === 'off' ? tr('non attivo') : st.status === 'error' ? tr('errore') : st.status === 'syncing' ? tr('in corso') : tr('attivo')}${icon('chevron-right')}</span></button>
-    </div>
+    </div>`}
     <div class="actions"><button class="btn primary" id="go"></button></div>`);
 
   const draw = async () => {
@@ -2093,10 +2139,11 @@ async function exportSheet(only) {
       if (t) t.textContent = text;
     };
     try {
-      await waitProcessing((left) => upd(0, tr('Finisco di elaborare le pagine ({n})…', { n: left })), ctrl.signal, P.order);
-      const fresh = pick(await db.getProject(P.id));
-      // nel nome del file, le pagine esportate (es. «libro-p3-7_10»)
+      await waitProcessing((left) => upd(0, tr('Finisco di elaborare le pagine ({n})…', { n: left })), ctrl.signal, P.order, books ? books.map((b) => b.id) : undefined);
+      const fresh = books ? join((await Promise.all(books.map((b) => db.getProject(b.id)))).filter(Boolean)) : pick(await db.getProject(P.id));
+      // nel nome del file, le pagine esportate (es. «libro-p3-7_10») o i libri, uno dopo l'altro
       const part = only ? `-p${pageRanges(S.project.order, only)}` : '';
+      const base = books ? fresh.parts.map((b) => E.slug(b.name)).join('_').slice(0, 80).replace(/[-_]+$/, '') : E.slug(fresh.name);
       let blob;
       let name;
       if (o.kind === 'pdf') {
@@ -2107,10 +2154,10 @@ async function exportSheet(only) {
             else upd(o.ocr ? 0.85 + (done / total) * 0.15 : done / total, tr('Impagino: {i} di {n}', { i: done, n: total }));
           },
         });
-        name = `${E.slug(fresh.name)}${part}.pdf`;
+        name = `${base}${part}.pdf`;
       } else {
         blob = await E.buildImagesZip(fresh, { quality: o.quality, onProgress: ({ done, total }) => upd(done / total, tr('Pagina {i} di {n}', { i: done + 1, n: total })) });
-        name = `${E.slug(fresh.name)}${part}-${E.slug(tr('immagini'))}.zip`;
+        name = `${base}${part}-${E.slug(tr('immagini'))}.zip`;
       }
       if (ctrl.signal.aborted) return;
       prog.close();
@@ -2138,11 +2185,12 @@ function pageRanges(order, ids) {
   return out.join('_');
 }
 
-function waitProcessing(onLeft, signal, order = S.project.order) {
+function waitProcessing(onLeft, signal, order = S.project.order, projects = [S.project.id]) {
   return new Promise((resolve, reject) => {
     const check = async () => {
       if (signal.aborted) return reject(new DOMException('annullato', 'AbortError'));
-      const pages = await db.getPages(S.project.id);
+      const pages = new Map();
+      for (const id of projects) for (const [k, v] of await db.getPages(id)) pages.set(k, v);
       const left = order.filter((id) => pages.get(id) && pages.get(id).status === 'pending').length;
       if (!left) return resolve();
       onLeft(left);

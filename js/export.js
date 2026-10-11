@@ -55,9 +55,17 @@ function sanitize(font, s) {
   }
 }
 
+// Le pagine di un libro, o di più libri esportati insieme (project.parts).
+async function pagesOf(project) {
+  if (!project.parts) return db.getPages(project.id);
+  const all = new Map();
+  for (const p of project.parts) for (const [id, page] of await db.getPages(p.id)) all.set(id, page);
+  return all;
+}
+
 // onProgress({ phase: 'ocr'|'pdf', done, total, detail })
 export async function buildPdf(project, { quality = 'medium', ocr = true, engine = 'paddle', langs = ['ita', 'eng'], size = 'image', onProgress, signal } = {}) {
-  const pages = await db.getPages(project.id);
+  const pages = await pagesOf(project);
   const ids = project.order.filter((id) => pages.has(id));
   const total = ids.length;
 

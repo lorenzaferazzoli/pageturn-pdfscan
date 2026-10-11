@@ -434,6 +434,44 @@ print(avg(0.31), avg(0.31 + 40 / ${box.height}))`]).toString().trim().split(' ')
   await page.waitForSelector('text=(ripristino)', { timeout: 30000 });
   const projects = await page.$$eval('.proj', (e) => e.length);
   check(projects === 2, 'backup importato come nuovo libro');
+
+  // più libri in un PDF solo, nell'ordine in cui si toccano
+  await page.waitForFunction(() => !document.querySelector('.sheet'), null, { timeout: 10000 }).catch(() => page.click('.sheet [data-close]'));
+  const names = await page.$$eval('.proj .name', (e) => e.map((x) => x.textContent));
+  const restored = names.find((n) => /ripristino/.test(n));
+  const other = names.find((n) => n !== restored);
+  const row = (n) => page.locator('.proj').filter({ has: page.locator('.name', { hasText: n }) }).filter({ hasNotText: n === other ? 'ripristino' : '\u0000' });
+  await page.click('[data-a="hselect"]');
+  await row(other).click();
+  await row(restored).click();
+  await row(other).click(); // tolto il primo: l'altro diventa 1
+  const ords2 = await page.$$eval('.proj .ord', (e) => e.map((x) => x.textContent).join(''));
+  await row(restored).click();
+  await row(restored).click();
+  await row(other).click();
+  const ords = await page.$$eval('.proj', (e) => e.map((r) => [r.querySelector('.name').textContent, r.querySelector('.ord').textContent]));
+  await page.waitForTimeout(200);
+  await shot('16-home-seleziona');
+  await page.click('[data-a="hexport"]');
+  await page.waitForSelector('#go');
+  const mTitle = await page.textContent('.sheet h2');
+  if (await page.isChecked('#ocr')) await page.click('label.li:has(#ocr)');
+  await page.click('#go');
+  await page.waitForSelector('text=PDF pronto', { timeout: 240000 });
+  const [dl5] = await Promise.all([page.waitForEvent('download'), page.click('[data-dl]')]);
+  const pdf5 = join(out, 'libri-insieme.pdf');
+  await dl5.saveAs(pdf5);
+  const info5 = execFileSync('pdfinfo', [pdf5]).toString();
+  const p5 = +(info5.match(/Pages:\s+(\d+)/) || [])[1];
+  const t5 = (info5.match(/Title:\s+(.*)/) || [])[1] || '';
+  const slugOf = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC').replace(/[^\p{L}\p{N}\p{M}]+/gu, '-').replace(/^-|-$/g, '').toLowerCase();
+  check(ords.find(([n]) => n === restored)[1] === '1' && ords.find(([n]) => n === other)[1] === '2' && ords2 === '1',
+    `libri numerati nell'ordine in cui si toccano (${ords.map(([, o]) => o).join(',')}; tolto il primo: ${ords2})`);
+  check(p5 === 14 && /Esporta 2 libri/.test(mTitle) && t5.trim() === `${restored} + ${other}` && dl5.suggestedFilename() === `${slugOf(restored)}_${slugOf(other)}.pdf`,
+    `due libri in un PDF solo (${p5} pagine, «${t5.trim()}», «${dl5.suggestedFilename()}»)`);
+  await page.click('[data-a="hdone"]');
+  await page.waitForSelector('[data-a="new"]');
+
   await page.emulateMedia({ colorScheme: 'dark' });
   await shot('15-home-scuro');
 } catch (e) {

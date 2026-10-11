@@ -140,6 +140,9 @@ img { -webkit-user-drag: none; }
 .proj .name { font-weight: 600; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .proj .sub { color: var(--text-2); font-size: 13px; }
 .proj .more { color: var(--muted); width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; }
+.proj .ord { flex: none; width: 26px; height: 26px; margin: 0 5px; border-radius: 50%; border: 1.5px solid var(--muted); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.proj .ord.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.proj.sel .cover { outline: 2.5px solid var(--accent); outline-offset: 1px; }
 
 .empty { text-align: center; padding: 48px 32px; color: var(--text-2); }
 .empty .big { width: 64px; height: 64px; border-radius: 18px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; }

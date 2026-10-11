@@ -777,13 +777,48 @@ function robustLine(pts, M, diag, T = [0.004, 0.002], need = [0.4, 0.35], min = 
   return line;
 }
 
+// Retta che passa vicino al maggior numero di punti (si provano le rette per due punti), poi rifinita
+// sui punti vicini: i punti sbagliati, anche tanti, non la spostano. null se d'accordo sono pochi.
+function votedLine(pts, M, diag, tol = 0.006, need = 0.3) {
+  const T = Math.max(1.5, diag * tol);
+  const min = Math.max(8, Math.ceil(M * need));
+  if (pts.length < min) return null;
+  const near = (L, t) => pts.filter((q) => Math.abs((q[0] - L.p[0]) * -L.d[1] + (q[1] - L.p[1]) * L.d[0]) < t);
+  let best = null;
+  let bestN = 0;
+  for (let a = 0; a < pts.length; a++) {
+    for (let b = a + 1; b < pts.length; b++) {
+      const dx = pts[b][0] - pts[a][0];
+      const dy = pts[b][1] - pts[a][1];
+      const l = Math.hypot(dx, dy);
+      if (l < diag * 0.05) continue;
+      const L = { p: pts[a], d: [dx / l, dy / l] };
+      const n = near(L, T).length;
+      if (n > bestN) { bestN = n; best = L; }
+    }
+  }
+  if (!best || bestN < min) return null;
+  let L = fitLine(near(best, T));
+  for (const t of [T, T * 0.7]) {
+    const sel = near(L, t);
+    if (sel.length < min) break;
+    L = fitLine(sel);
+  }
+  return L;
+}
+
 // ---------- bordi a partire da una stima (UVDoc) ----------
 // La stima di UVDoc è buona su tre lati, ma in basso scende spesso oltre la pagina (sul resto del
-// libro, sulla mano, sul pavimento). Per ogni lato, in 48 punti, si cerca lungo la perpendicolare il
-// bordo della carta (chiaro dentro, più scuro fuori), poi una retta robusta. Un bordo vale solo se la
-// striscia tra la stima e il bordo sta dalla parte giusta: rientrando, quello che si toglie non deve
-// essere carta (così le righe di testo e i titoli non contano); allargando, quello che si aggiunge
-// deve esserlo. Se un lato non si trova, resta quello della stima.
+// libro, sulla mano, sul pavimento) e dal lato della piega va spesso sull'altra pagina. Per ogni lato,
+// in 48 punti, si guarda la foto lungo la perpendicolare, mediata lungo il lato (così il testo diventa
+// un grigio uniforme), e si parte dall'interno della pagina andando verso fuori:
+// - il bordo è il primo salto da chiaro a scuro oltre il quale non c'è più carta. Per dire "carta" si
+//   usa un valore alto tra i campioni lungo il lato: tra le righe di testo c'è sempre carta bianca,
+//   su un muro, un mobile o il resto del libro no. Il confronto è con la carta lì vicino, perché la
+//   pagina può essere in ombra;
+// - sui lati lunghi, se prima del bordo si incontra una valle stretta con carta da tutte e due le parti
+//   e il margine liscio dentro, è la piega in mezzo al libro: si tiene la più profonda.
+// Poi una retta per i punti che vanno d'accordo; se un lato non si trova, resta quello della stima.
 export function snapQuad(gray, w, h, qn, { out: OUT = 0.03, inn: INN = 0.25 } = {}) {
   const g = boxBlur(boxBlur(gray, w, h, 1), w, h, 1);
   const F = qn.map(([x, y]) => [x * w, y * h]);
@@ -795,61 +830,100 @@ export function snapQuad(gray, w, h, qn, { out: OUT = 0.03, inn: INN = 0.25 } = 
     const X = Math.floor(x); const Y = Math.floor(y); const fx = x - X; const fy = y - Y; const i = Y * w + X;
     return (g[i] * (1 - fx) + g[i + 1] * fx) * (1 - fy) + (g[i + w] * (1 - fx) + g[i + w + 1] * fx) * fy;
   };
-  const B = Math.max(4, Math.round(diag * 0.006));
+  const B = Math.max(4, Math.round(diag * 0.006)); // bande per misurare un salto
+  const K = Math.max(8, Math.round(diag * 0.025)); // tratto in cui cercare la carta
+  const sideLen = (k) => Math.hypot(F[(k + 1) % 4][0] - F[k][0], F[(k + 1) % 4][1] - F[k][1]);
   const lines = [];
   for (let k = 0; k < 4; k++) {
     const A = F[k];
     const C = F[(k + 1) % 4];
-    const len = Math.hypot(C[0] - A[0], C[1] - A[1]);
+    const len = sideLen(k);
     const d = [(C[0] - A[0]) / len, (C[1] - A[1]) / len];
     let n = [-d[1], d[0]]; // verso l'interno
     if ((cx - A[0]) * n[0] + (cy - A[1]) * n[1] < 0) n = [-n[0], -n[1]];
+    let ext = 0;
+    for (const P of F) ext = Math.max(ext, (P[0] - A[0]) * n[0] + (P[1] - A[1]) * n[1]);
+    // la piega sta su un lato lungo e verticale (la pagina è più alta che larga): sugli altri lati
+    // le righe di testo sembrerebbero pieghe
+    const fold = len >= 0.9 * Math.max(sideLen((k + 1) % 4), sideLen((k + 3) % 4)) && Math.abs(d[1]) > Math.abs(d[0]);
+    const vmax = Math.round(diag * 0.07);
     const out = Math.round(diag * OUT);
-    const inn = Math.round(diag * INN);
-    const off = out + B + 3;
-    const L = out + inn + 2 * B + 7;
-    const pts = [];
+    const inn = Math.round(Math.min(diag * INN, ext * 0.45));
+    const off = out + K + B + 4;
+    const L = off + inn + B + 4;
     const M = 48;
+    const hw = (1.5 * 0.84 * len) / (M - 1); // mezza larghezza del tratto mediato lungo il lato
+    const nt = Math.max(1, Math.round(hw / 3)); // un campione ogni 3 px circa
+    const prof = new Float32Array(L); // media lungo il lato
+    const pm = new Float32Array(L); // la carta: un valore alto tra i campioni lungo il lato
+    const cs = new Float64Array(L + 1);
+    const buf = new Float32Array(2 * nt + 1);
+    const pts = [];
     for (let i = 0; i < M; i++) {
       const t = 0.08 + (0.84 * i) / (M - 1);
       const P = [A[0] + (C[0] - A[0]) * t, A[1] + (C[1] - A[1]) * t];
-      const prof = new Float32Array(L);
       let first = 0; // i primi campioni possono cadere fuori dalla foto
       let bad = false;
       for (let j = 0; j < L; j++) {
         const s = j - off;
-        const v = at(P[0] + n[0] * s, P[1] + n[1] * s);
-        if (v < 0) { if (s < 0) { first = j + 1; continue; } bad = true; break; }
-        prof[j] = v;
+        let sum = 0;
+        let c = 0;
+        for (let u = -nt; u <= nt; u++) {
+          const v = at(P[0] + n[0] * s + (d[0] * u * hw) / nt, P[1] + n[1] * s + (d[1] * u * hw) / nt);
+          if (v >= 0) { sum += v; buf[c++] = v; }
+        }
+        if (c < nt) { if (s < 0) { first = j + 1; continue; } bad = true; break; }
+        prof[j] = sum / c;
+        const b = buf.subarray(0, c).sort();
+        pm[j] = b[Math.floor((c - 1) * 0.8)];
       }
       if (bad) continue;
-      const cs = new Float64Array(L + 1);
       for (let j = 0; j < L; j++) cs[j + 1] = cs[j] + prof[j];
       const mean = (a, b) => (cs[b + 1] - cs[a]) / (b - a + 1);
-      const E = new Float32Array(out + inn + 1);
-      for (let s = -out; s <= inn; s++) {
+      const max = (a, b) => { let m = 0; for (let j = Math.max(a, first); j <= b; j++) if (pm[j] > m) m = pm[j]; return m; };
+      // livello della carta, verso l'interno
+      const deep = Array.from(pm.subarray(off + (inn >> 1), off + inn + 1)).sort((x, y) => x - y);
+      const Pl = deep[Math.floor(deep.length * 0.9)];
+      const dl = Math.max(12, Pl * 0.1);
+      const E = (j) => (j - 2 - B < first ? 0 : mean(j + 2, j + 1 + B) - mean(j - 1 - B, j - 2));
+      let hit = null;
+      let valley = null;
+      let vdepth = 0;
+      for (let s = inn - B - 2; s > -out; s--) {
         const j = s + off;
-        E[s + out] = j - 2 - B < first ? 0 : mean(j + 2, j + 1 + B) - mean(j - 1 - B, j - 2);
+        if (j - 3 - K < first) break;
+        const e = E(j);
+        if (e >= dl && e >= E(j - 1) && e >= E(j + 1)) {
+          const lp = Math.min(Pl, max(j + 3, j + 3 + K));
+          if (max(j - 3 - K, j - 3) <= lp - Math.max(12, lp * 0.1)) {
+            const e0 = E(j - 1); const e2 = E(j + 1); const den = e0 - 2 * e + e2;
+            hit = s + (den ? (0.5 * (e0 - e2)) / den : 0);
+            break;
+          }
+        }
+        if (!fold || s > vmax) continue;
+        const v = pm[j];
+        let isMin = true;
+        for (let q = j - B; q <= j + B && isMin; q++) if (pm[q] < v) isMin = false;
+        if (!isMin) continue;
+        const mo = max(j - K, j - 1);
+        const depth = Math.min(mo, max(j + 1, j + K)) - v;
+        if (depth < Math.max(10, Pl * 0.1) || depth <= vdepth || mo < Pl - 2 * dl) continue;
+        // dentro la piega c'è il margine: carta liscia (tolta la pendenza dell'ombra)
+        const a = j + B; const b = j + K;
+        const ya = (pm[a] + pm[a + 1] + pm[a + 2] + pm[a + 3]) / 4;
+        const yb = (pm[b] + pm[b - 1] + pm[b - 2] + pm[b - 3]) / 4;
+        let dev = 0;
+        for (let q = a; q <= b; q++) dev = Math.max(dev, Math.abs(pm[q] - (ya + ((yb - ya) * (q - a - 1.5)) / (b - a - 3))));
+        if (dev > Pl * 0.09) continue;
+        const v0 = pm[j - 1]; const v2 = pm[j + 1]; const den = v0 - 2 * v + v2;
+        valley = s + (den ? (0.5 * (v0 - v2)) / den : 0);
+        vdepth = depth;
       }
-      let best = null;
-      let bestE = 0;
-      for (let s = -out + 1; s < inn; s++) {
-        const e = E[s + out];
-        if (e < 12 || e < E[s + out - 1] || e < E[s + out + 1]) continue;
-        const j = s + off;
-        const mid = (mean(j + 2, j + 1 + B) + mean(j - 1 - B, j - 2)) / 2;
-        if (s > 3 && mean(off, j - 1) > mid) continue;
-        if (s < -3 && (j + 1 < first || mean(j + 1, off) < mid)) continue;
-        if (e > bestE) { bestE = e; best = s; }
-      }
-      if (best === null) continue;
-      const e0 = E[best + out - 1]; const e1 = E[best + out]; const e2 = E[best + out + 1];
-      const den = e0 - 2 * e1 + e2;
-      const sub = best + (den ? (0.5 * (e0 - e2)) / den : 0);
-      pts.push([P[0] + n[0] * sub, P[1] + n[1] * sub]);
+      if (valley !== null) hit = valley;
+      if (hit !== null) pts.push([P[0] + n[0] * hit, P[1] + n[1] * hit]);
     }
-    // i bordi di una pagina di libro sono un po' curvi: tolleranza più larga che per la foto piatta
-    lines.push(robustLine(pts, M, diag, [0.01, 0.006, 0.004], [0.3, 0.3], 8) || { p: A, d });
+    lines.push(votedLine(pts, M, diag) || { p: A, d });
   }
   const R = [];
   for (let k = 0; k < 4; k++) {
