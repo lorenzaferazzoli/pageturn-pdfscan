@@ -8,7 +8,7 @@ import { splitQuad, FULL_QUAD, homography } from './proc.js';
 import { ENGINES as OCR_ENGINES } from './ocr.js';
 import { tr, trp, sp, locale, setLang, langPref, LANGS } from './i18n.js';
 
-export const VERSION = '1.10.0';
+export const VERSION = '1.10.1';
 export const REPO = 'https://github.com/lorenzaferazzoli/pageturn-pdfscan';
 
 // ---------- utilità ----------

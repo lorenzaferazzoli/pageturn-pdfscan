@@ -377,8 +377,13 @@ print(avg(0.31), avg(0.31 + 40 / ${box.height}))`]).toString().trim().split(' ')
   await page.waitForSelector('#go');
   await page.click('[data-s="a4"]');
   await page.click('[data-e="tesseract"]');
+  // la barra di avanzamento non deve tornare indietro tra una pagina e l'altra
+  await page.evaluate(() => { window.__bars = []; window.__barTimer = setInterval(() => { const b = document.querySelector('#bar'); if (b) window.__bars.push(parseFloat(b.style.width) || 0); }, 40); });
   await page.click('#go');
   await page.waitForSelector('text=PDF pronto', { timeout: 240000 });
+  const bars = await page.evaluate(() => { clearInterval(window.__barTimer); return window.__bars; });
+  const back = bars.reduce((m, v, i) => Math.max(m, i ? bars[i - 1] - v : 0), 0);
+  check(bars.length > 5 && back <= 1 && Math.max(...bars) > 50, `barra di avanzamento con Tesseract sempre in avanti (fino a ${Math.max(...bars)}%, indietro al massimo di ${back} punti)`);
   const [dl3] = await Promise.all([page.waitForEvent('download'), page.click('[data-dl]')]);
   const pdf3 = join(out, 'libro-a4.pdf');
   await dl3.saveAs(pdf3);

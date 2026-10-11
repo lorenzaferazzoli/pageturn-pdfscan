@@ -13,8 +13,11 @@ const base = new URL('../vendor/', import.meta.url).href;
 // ---------- Tesseract ----------
 let tess = null;
 let tessLangs = '';
+// Il motore si crea una volta e serve per tutte le pagine: i suoi messaggi di avanzamento vanno
+// alla pagina in corso, non a quella per cui è stato creato.
+let tessProgress = null;
 
-async function tesseract(langs, onProgress) {
+async function tesseract(langs) {
   const key = langs.join('+');
   if (tess && tessLangs === key) return tess;
   if (tess) await tess.terminate();
@@ -26,14 +29,15 @@ async function tesseract(langs, onProgress) {
     langPath: base + 'tessdata',
     workerBlobURL: false,
     gzip: true,
-    logger: (m) => onProgress && onProgress(m),
+    logger: (m) => tessProgress && tessProgress(m),
   });
   tessLangs = key;
   return tess;
 }
 
 async function recognizeTesseract(blob, langs, onProgress) {
-  const w = await tesseract(langs, onProgress);
+  tessProgress = onProgress;
+  const w = await tesseract(langs);
   const { data } = await w.recognize(blob, {}, { text: true, blocks: true });
   const words = [];
   for (const b of data.blocks || []) {
